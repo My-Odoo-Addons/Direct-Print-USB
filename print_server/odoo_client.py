@@ -127,17 +127,41 @@ class OdooClient:
         # Récupérer le caissier
         cashier = self._get_user_name(order.get("user_id"))
 
+        # Récupérer le client
+        customer = self._get_partner_name(order.get("partner_id"))
+
         # Calculer le rendu de monnaie
-        total_paid = sum(p.get("amount", 0) for p in payments)
-        change = max(0, total_paid - order["amount_total"])
+        # Utiliser la somme des paiements positifs pour éviter les problèmes avec amount_paid
+        total_paid_positive = sum(p.get("amount", 0) for p in payments if p.get("amount", 0) > 0)
+        change = max(0, total_paid_positive - order["amount_total"])
 
         # Calculer les totaux avec/sans remise
-        total_before_discount = sum(
-            line.get("qty", 1) * line.get("price_unit", 0) for line in lines
+        # Exclure les lignes de remise globale (prix négatif et nom contenant remise/discount/%)
+        def is_discount_line(line):
+            name = line.get("product_id", [0, ""])[1] if line.get("product_id") else ""
+            price = line.get("price_unit", 0)
+            return price < 0 and any(word in name.lower() for word in ["remise", "discount", "%", "sur votre"])
+        
+        regular_lines = [line for line in lines if not is_discount_line(line)]
+        discount_lines = [line for line in lines if is_discount_line(line)]
+        
+        total_before_discount_ht = sum(
+            line.get("qty", 1) * line.get("price_unit", 0) for line in regular_lines
         )
-        total_discount = total_before_discount - (
-            order["amount_total"] - order["amount_tax"]
-        )
+        
+        # Calculer le taux de TVA moyen pour obtenir le total TTC avant remise
+        # Utiliser le taux de TVA du subtotal actuel pour estimer
+        tax_rate = order["amount_tax"] / (order["amount_total"] - order["amount_tax"]) if (order["amount_total"] - order["amount_tax"]) > 0 else 0
+        total_before_discount = total_before_discount_ht * (1 + tax_rate)
+        
+        # Calculer la remise totale (valeur absolue des lignes de remise)
+        total_discount_amount = abs(sum(
+            line.get("qty", 1) * line.get("price_unit", 0) * (1 + tax_rate) for line in discount_lines
+        ))
+        
+        # Vérifier avec le calcul alternatif basé sur les totaux
+        calculated_discount = total_before_discount - order["amount_total"]
+        total_discount = max(total_discount_amount, calculated_discount) if total_discount_amount > 0 else calculated_discount
 
         # Construire les données du ticket
         return {
@@ -148,6 +172,7 @@ class OdooClient:
             "company_email": company.get("email", ""),
             "company_website": company.get("website", ""),
             "cashier": cashier,
+            "customer": customer,
             "table": order["table_id"][1] if order.get("table_id") else "",
             "customer_count": order.get("customer_count", ""),
             "lines": [
@@ -254,6 +279,15 @@ class OdooClient:
         uid = user_id[0] if isinstance(user_id, (list, tuple)) else user_id
         users = self.search_read("res.users", [("id", "=", uid)], ["name"], limit=1)
         return users[0]["name"] if users else ""
+
+    def _get_partner_name(self, partner_id):
+        """Récupère le nom d'un partenaire/client"""
+        if not partner_id:
+            return ""
+
+        pid = partner_id[0] if isinstance(partner_id, (list, tuple)) else partner_id
+        partners = self.search_read("res.partner", [("id", "=", pid)], ["name"], limit=1)
+        return partners[0]["name"] if partners else ""
 
     def _get_tax_details(self, lines, order_tax=0):
         """
