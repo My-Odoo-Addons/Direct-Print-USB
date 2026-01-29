@@ -91,6 +91,9 @@ class ReceiptFormatter:
         """Génère le contenu formaté du ticket en bytes"""
         currency = data.get("currency_symbol", "Ar")
         currency_pos = data.get("currency_position", "after")
+        
+        # Récupérer les détails des taxes en avance (pour calcul HT/TVA par ligne)
+        tax_details = data.get("tax_details", [])
 
         # Utiliser bytearray pour construire le ticket
         output = bytearray()
@@ -142,32 +145,26 @@ class ReceiptFormatter:
         add_text(self.separator())
         add_cmd(escpos.ALIGN_LEFT)
 
-        # === INFOS TICKET ===
-        order_name = data.get("order_name", "")
+        # # === INFOS TICKET ===
+        # order_name = data.get("order_name", "")
+        # date_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+        # add_text(f"Ticket: {order_name[:16].ljust(16)}  {date_str}")
+        
         date_str = datetime.now().strftime("%d/%m/%Y %H:%M")
-        add_text(f"Ticket: {order_name[:16].ljust(16)}  {date_str}")
+        add_text(f"Date : {date_str}")
 
         if data.get("cashier"):
             add_text(f"Caissier: {data['cashier']}")
 
         if data.get("table"):
-            table_info = f"Table: {data['table']}"
+            # table_info = f"Salle : {data['table'][0]} - Table : {data['table'][1]}"
+            salle, table_num = data['table'].split(', ', 1)
+            table_info = f"Salle : {salle} - Table : {table_num}"
             if data.get("customer_count"):
-                table_info += f"  Couverts: {data['customer_count']}"
+                table_info += f"\nCouvert(s): {data['customer_count']}"
             add_text(table_info)
 
         add_text(self.separator())
-
-        # === EN-TÊTE TABLEAU ARTICLES ===
-        add_text(
-            self.format_table_row(
-                [
-                    {"text": "ARTICLES", "width": 0.70, "align": "left"},
-                    {"text": "TOTAL", "width": 0.30, "align": "right"},
-                ]
-            )
-        )
-        add_text("")
 
         # === LIGNES DE PRODUITS ===
         total_qty = 0
@@ -175,43 +172,65 @@ class ReceiptFormatter:
             if isinstance(item, dict):
                 name = item.get("name", "Produit")
                 qty = item.get("qty", 1)
-                price = item.get("price", 0)
-                subtotal = item.get("subtotal", qty * price)
+                price = item.get("price", 0)  # Prix unitaire TTC
+                subtotal = item.get("subtotal", qty * price)  # Total TTC
                 discount = item.get("discount", 0)
                 is_free = item.get("is_free", False)
 
                 total_qty += qty
 
-                # Ligne principale: (Qté) Nom ........... Total
+                # Calculer le prix HT et la TVA
+                tax_rate = 15  # Taux par défaut
+                if tax_details and len(tax_details) > 0:
+                    tax_rate = tax_details[0].get("rate", 15)
+                
+                # Calcul HT et TVA pour la ligne
+                subtotal_ht = subtotal / (1 + tax_rate / 100)
+                tva_line = subtotal - subtotal_ht
+
+                # Ligne 1: (Qté) Nom produit ... HT (en gras)
                 qty_str = f"({int(qty)})"
-                display_name = f"{qty_str} {name[:25]}"
+                display_name = f"{qty_str} {name[:28]}"
 
                 if is_free:
-                    total_str = "*OFFERT"
+                    ht_str = "*OFFERT"
                 else:
-                    total_str = self.format_money(subtotal, currency, currency_pos)
+                    ht_str = self.format_money(subtotal_ht, currency, currency_pos)
 
                 add_cmd(escpos.BOLD_ON)
                 add_text(
                     self.format_table_row(
                         [
                             {"text": display_name, "width": 0.65, "align": "left"},
-                            {"text": total_str, "width": 0.35, "align": "right"},
+                            {"text": ht_str, "width": 0.35, "align": "right"},
                         ]
                     )
                 )
                 add_cmd(escpos.BOLD_OFF)
 
-                # Sous-ligne: prix unitaire
-                unit_price = self.format_money(price, currency, currency_pos)
-                add_text(f"   {qty:.2f} x {unit_price} / Unite")
+                # Ligne 2: Qté x Prix unitaire
+                if not is_free:
+                    price_unit_ht = price / (1 + tax_rate / 100)
+                    add_text(f"   {int(qty)} x {self.format_money(price_unit_ht, currency, currency_pos)}")
+
+                # Ligne 3: Taux : X% ... TVA
+                if not is_free:
+                    tva_str = self.format_money(tva_line, currency, currency_pos)
+                    add_text(
+                        self.format_table_row(
+                            [
+                                {"text": f"Taux : {tax_rate:.0f}%", "width": 0.65, "align": "left"},
+                                {"text": tva_str, "width": 0.35, "align": "right"},
+                            ]
+                        )
+                    )
 
                 # Remise si applicable
                 if discount and float(discount) > 0:
                     add_text(
                         self.format_table_row(
                             [
-                                {"text": "   Remise", "width": 0.65, "align": "left"},
+                                {"text": "Remise", "width": 0.65, "align": "left"},
                                 {
                                     "text": f"-{self.format_money(discount, currency, currency_pos)}",
                                     "width": 0.35,
@@ -220,6 +239,9 @@ class ReceiptFormatter:
                             ]
                         )
                     )
+
+                # Saut de ligne avant le prochain produit
+                add_text("")
 
         add_text(self.separator())
 
@@ -256,6 +278,42 @@ class ReceiptFormatter:
             )
 
         # === TOTAL A PAYER ===
+        # Calcul HT et TVA totaux
+        for tax in tax_details:
+            add_text(
+                self.format_table_row(
+                    [
+                        {
+                            "text": "HT ",
+                            "width": 0.55,
+                            "align": "left",
+                        },
+                        {
+                            "text": self.format_money(tax.get("base", 0), currency, currency_pos),
+                            "width": 0.25,
+                            "align": "right",
+                        },
+                    ]
+                )
+            )
+            add_text(
+                self.format_table_row(
+                    [
+                        {
+                            "text": "TVA ",
+                            "width": 0.55,
+                            "align": "left",
+                        },
+                        {
+                            "text": self.format_money(tax.get("amount", 0), currency, currency_pos),
+                            "width": 0.25,
+                            "align": "right",
+                        },
+                    ]
+                )
+            )
+            
+
         add_cmd(escpos.BOLD_ON)
         add_text(
             self.format_table_row(
@@ -319,46 +377,45 @@ class ReceiptFormatter:
             )
 
         # === RECAP TVA ===
-        tax_details = data.get("tax_details", [])
-        if tax_details:
-            add_text(self.separator())
-            add_text(
-                self.format_table_row(
-                    [
-                        {"text": "TAUX", "width": 0.20, "align": "left"},
-                        {"text": "HT", "width": 0.25, "align": "left"},
-                        {"text": "TVA", "width": 0.25, "align": "left"},
-                        {"text": "TTC", "width": 0.30, "align": "left"},
-                    ]
-                )
-            )
-            for tax in tax_details:
-                add_text(
-                    self.format_table_row(
-                        [
-                            {
-                                "text": f"{tax.get('rate', 0)}%",
-                                "width": 0.20,
-                                "align": "left",
-                            },
-                            {
-                                "text": f"{tax.get('base', 0):.2f}",
-                                "width": 0.25,
-                                "align": "left",
-                            },
-                            {
-                                "text": f"{tax.get('amount', 0):.2f}",
-                                "width": 0.25,
-                                "align": "left",
-                            },
-                            {
-                                "text": f"{tax.get('total', 0):.2f}",
-                                "width": 0.30,
-                                "align": "left",
-                            },
-                        ]
-                    )
-                )
+        # if tax_details:
+        #     add_text(self.separator())
+        #     add_text(
+        #         self.format_table_row(
+        #             [
+        #                 {"text": "TAUX", "width": 0.20, "align": "left"},
+        #                 {"text": "HT", "width": 0.25, "align": "left"},
+        #                 {"text": "TVA", "width": 0.25, "align": "left"},
+        #                 {"text": "TTC", "width": 0.30, "align": "left"},
+        #             ]
+        #         )
+        #     )
+        #     for tax in tax_details:
+        #         add_text(
+        #             self.format_table_row(
+        #                 [
+        #                     {
+        #                         "text": f"{tax.get('rate', 0)}%",
+        #                         "width": 0.20,
+        #                         "align": "left",
+        #                     },
+        #                     {
+        #                         "text": f"{tax.get('base', 0):.2f}",
+        #                         "width": 0.25,
+        #                         "align": "left",
+        #                     },
+        #                     {
+        #                         "text": f"{tax.get('amount', 0):.2f}",
+        #                         "width": 0.25,
+        #                         "align": "left",
+        #                     },
+        #                     {
+        #                         "text": f"{tax.get('total', 0):.2f}",
+        #                         "width": 0.30,
+        #                         "align": "left",
+        #                     },
+        #                 ]
+        #             )
+        #         )
 
         # === PROGRAMME FIDÉLITÉ ===
         loyalty = data.get("loyalty")
@@ -375,14 +432,14 @@ class ReceiptFormatter:
             add_text(self.separator("-"))
 
             if loyalty.get("previous_points") is not None:
-                add_text(f"Solde precedent: {loyalty['previous_points']} pts")
-            if loyalty.get("points_earned") is not None:
-                add_text(f"Points gagnes: +{loyalty['points_earned']} pts")
+                add_text(f"Solde precedent: {loyalty['previous_points']:.1f} pts")
+            if loyalty.get("points_earned") is not None and loyalty["points_earned"] > 0:
+                add_text(f"Points gagnes: +{loyalty['points_earned']:.1f} pts")
             if loyalty.get("points_used") is not None and loyalty["points_used"] > 0:
-                add_text(f"Points utilises: -{loyalty['points_used']} pts")
+                add_text(f"Points utilises: {loyalty['points_used']:.1f} pts")
             if loyalty.get("current_points") is not None:
                 add_cmd(escpos.BOLD_ON)
-                add_text(f"Nouveau solde: {loyalty['current_points']} pts")
+                add_text(f"Nouveau solde: {loyalty['current_points']:.1f} pts")
                 add_cmd(escpos.BOLD_OFF)
 
             add_cmd(escpos.BOLD_ON)

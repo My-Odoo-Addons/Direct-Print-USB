@@ -88,7 +88,7 @@ class OdooClient:
         order = orders[0]
         order_id = order["id"]
 
-        # Récupérer les lignes de commande
+        # Récupérer les lignes de commande (avec tax_ids pour détails taxes)
         lines = self.search_read(
             "pos.order.line",
             [("order_id", "=", order_id)],
@@ -99,8 +99,17 @@ class OdooClient:
                 "price_subtotal_incl",
                 "discount",
                 "price_subtotal",
+                "points_cost",
+                "is_reward_line",
+                "tax_ids",
             ],
         )
+        
+        # Calculer les points utilisés à partir des lignes
+        total_points_used = sum(line.get("points_cost", 0) or 0 for line in lines)
+        
+        # Récupérer les détails des taxes
+        tax_details = self._get_tax_details(lines)
 
         # Récupérer les paiements
         payments = self.search_read(
@@ -175,8 +184,10 @@ class OdooClient:
             ],
             "currency_symbol": currency.get("symbol", "Ar"),
             "currency_position": currency.get("position", "after"),
+            # Détails des taxes
+            "tax_details": tax_details,
             # Données fidélité (si disponibles)
-            "loyalty": self._get_loyalty_data(order_id, order.get("partner_id")),
+            "loyalty": self._get_loyalty_data(order_id, order.get("partner_id"), total_points_used),
         }
 
     def _get_company(self, company_id):
@@ -244,10 +255,116 @@ class OdooClient:
         users = self.search_read("res.users", [("id", "=", uid)], ["name"], limit=1)
         return users[0]["name"] if users else ""
 
-    def _get_loyalty_data(self, order_id, partner_id):
+    def _get_tax_details(self, lines, order_tax=0):
+        """
+        Récupère et agrège les détails des taxes à partir des lignes de commande
+        
+        Args:
+            lines: Liste des lignes de commande
+            order_tax: Montant total de taxe de la commande (fallback)
+        
+        Retourne une liste de dict:
+        [
+            {
+                "name": "TVA 15%",
+                "rate": 15.0,
+                "base": 100.0,      # Montant HT
+                "amount": 15.0,     # Montant de la taxe
+                "total": 115.0      # Montant TTC
+            }
+        ]
+        """
+        if not lines:
+            return []
+        
+        # Collecter tous les tax_ids uniques
+        all_tax_ids = set()
+        for line in lines:
+            tax_ids = line.get("tax_ids", [])
+            if tax_ids:
+                all_tax_ids.update(tax_ids)
+        
+        # Calculer les totaux depuis les lignes
+        total_base = sum(line.get("price_subtotal", 0) or 0 for line in lines)
+        total_ttc = sum(line.get("price_subtotal_incl", 0) or 0 for line in lines)
+        total_tax = total_ttc - total_base
+        
+        # Fallback: si pas de tax_ids mais il y a des taxes calculées
+        if not all_tax_ids and total_tax > 0:
+            # Calculer le taux approximatif
+            if total_base > 0:
+                rate = round((total_tax / total_base) * 100, 0)
+            else:
+                rate = 0
+            
+            return [{
+                "name": f"TVA {rate:.0f}%",
+                "rate": rate,
+                "base": round(total_base, 2),
+                "amount": round(total_tax, 2),
+                "total": round(total_ttc, 2)
+            }]
+        
+        if not all_tax_ids:
+            return []
+        
+        # Récupérer les infos des taxes
+        taxes = self.search_read(
+            "account.tax",
+            [("id", "in", list(all_tax_ids))],
+            ["id", "name", "amount", "amount_type", "price_include"]
+        )
+        
+        # Créer un dictionnaire tax_id -> tax_info
+        tax_map = {t["id"]: t for t in taxes}
+        
+        # Agréger les montants par taxe
+        tax_totals = {}  # tax_id -> {base, amount, total}
+        
+        for line in lines:
+            tax_ids = line.get("tax_ids", [])
+            price_subtotal = line.get("price_subtotal", 0) or 0  # Montant HT
+            price_subtotal_incl = line.get("price_subtotal_incl", 0) or 0  # Montant TTC
+            tax_amount = price_subtotal_incl - price_subtotal  # Montant taxe
+            
+            for tax_id in tax_ids:
+                if tax_id not in tax_totals:
+                    tax_totals[tax_id] = {
+                        "base": 0,
+                        "amount": 0,
+                        "total": 0
+                    }
+                
+                tax_totals[tax_id]["base"] += price_subtotal
+                tax_totals[tax_id]["amount"] += tax_amount
+                tax_totals[tax_id]["total"] += price_subtotal_incl
+        
+        # Construire la liste des détails de taxes
+        tax_details = []
+        for tax_id, totals in tax_totals.items():
+            tax_info = tax_map.get(tax_id, {})
+            tax_details.append({
+                "name": tax_info.get("name", f"Taxe {tax_id}"),
+                "rate": tax_info.get("amount", 0),
+                "base": round(totals["base"], 2),
+                "amount": round(totals["amount"], 2),
+                "total": round(totals["total"], 2)
+            })
+        
+        # Trier par taux de taxe
+        tax_details.sort(key=lambda x: x["rate"])
+        
+        return tax_details
+
+    def _get_loyalty_data(self, order_id, partner_id, points_used_from_lines=0):
         """
         Récupère les données du programme fidélité pour un client
-        Compatible avec le module loyalty de Odoo
+        Compatible avec le module loyalty de Odoo 18
+        
+        Args:
+            order_id: ID de la commande
+            partner_id: ID du client
+            points_used_from_lines: Points utilisés calculés depuis pos.order.line.points_cost
         """
         if not partner_id:
             return None
@@ -255,45 +372,101 @@ class OdooClient:
         pid = partner_id[0] if isinstance(partner_id, (list, tuple)) else partner_id
 
         try:
-            # Essayer de récupérer les données fidélité (Odoo 16+)
-            # Le modèle peut varier selon la version et les modules installés
-
-            # Vérifier si le module loyalty est installé
+            # Chercher l'historique de fidélité pour cette commande
+            # C'est la source la plus fiable pour les points gagnés
+            history = self.search_read(
+                "loyalty.history",
+                [("order_id", "=", order_id)],
+                ["card_id", "issued", "used", "description"],
+            )
+            
+            if history:
+                # Trouver l'entrée du programme de fidélité (pas Gift Card)
+                for h in history:
+                    card_id = h["card_id"][0] if h.get("card_id") else None
+                    if card_id:
+                        # Récupérer les infos de la carte
+                        cards = self.search_read(
+                            "loyalty.card",
+                            [("id", "=", card_id)],
+                            ["code", "points", "program_id", "point_name"],
+                            limit=1
+                        )
+                        
+                        if cards:
+                            card = cards[0]
+                            program_name = card["program_id"][1] if card.get("program_id") else ""
+                            
+                            # Privilégier le programme "Loyalty" et ignorer les Gift Cards
+                            if "loyalty" in program_name.lower() or "fidélité" in program_name.lower():
+                                points_earned = h.get("issued", 0)
+                                # Utiliser points_used_from_lines si disponible, sinon l'historique
+                                points_used = points_used_from_lines if points_used_from_lines > 0 else h.get("used", 0)
+                                current_points = card.get("points", 0)
+                                
+                                return {
+                                    "card_number": card.get("code", ""),
+                                    "program_name": program_name,
+                                    "point_name": card.get("point_name", "pts"),
+                                    "current_points": current_points,
+                                    "previous_points": current_points - points_earned + points_used,
+                                    "points_earned": points_earned,
+                                    "points_used": points_used,
+                                }
+                
+                # Si pas de programme Loyalty trouvé, prendre le premier historique non-Gift Card
+                for h in history:
+                    card_id = h["card_id"][0] if h.get("card_id") else None
+                    if card_id:
+                        cards = self.search_read(
+                            "loyalty.card",
+                            [("id", "=", card_id)],
+                            ["code", "points", "program_id", "point_name"],
+                            limit=1
+                        )
+                        
+                        if cards:
+                            card = cards[0]
+                            program_name = card["program_id"][1] if card.get("program_id") else ""
+                            
+                            # Ignorer les Gift Cards
+                            if "gift" not in program_name.lower():
+                                points_earned = h.get("issued", 0)
+                                # Utiliser points_used_from_lines si disponible
+                                points_used = points_used_from_lines if points_used_from_lines > 0 else h.get("used", 0)
+                                current_points = card.get("points", 0)
+                                
+                                return {
+                                    "card_number": card.get("code", ""),
+                                    "program_name": program_name,
+                                    "point_name": card.get("point_name", "pts"),
+                                    "current_points": current_points,
+                                    "previous_points": current_points - points_earned + points_used,
+                                    "points_earned": points_earned,
+                                    "points_used": points_used,
+                                }
+            
+            # Fallback: chercher la carte fidélité du client (programme type "loyalty")
             loyalty_cards = self.search_read(
-                "loyalty.card", [("partner_id", "=", pid)], ["points", "code"], limit=1
+                "loyalty.card", 
+                [("partner_id", "=", pid)], 
+                ["points", "code", "program_id", "point_name"]
             )
 
-            if loyalty_cards:
-                card = loyalty_cards[0]
-
-                # Récupérer l'historique des points pour cette commande
-                points_history = (
-                    self.search_read(
-                        "loyalty.history",
-                        [("card_id", "=", card["id"]), ("order_id", "=", order_id)],
-                        ["points", "type"],
-                        limit=10,
-                    )
-                    if "loyalty.history" in self._get_models()
-                    else []
-                )
-
-                points_earned = sum(
-                    h["points"] for h in points_history if h.get("type") == "add"
-                )
-                points_used = sum(
-                    abs(h["points"]) for h in points_history if h.get("type") == "use"
-                )
-
-                return {
-                    "card_number": card.get("code", ""),
-                    "current_points": card.get("points", 0),
-                    "previous_points": card.get("points", 0)
-                    - points_earned
-                    + points_used,
-                    "points_earned": points_earned,
-                    "points_used": points_used,
-                }
+            for card in loyalty_cards:
+                program_name = card["program_id"][1] if card.get("program_id") else ""
+                # Chercher uniquement les programmes de type fidélité
+                if "loyalty" in program_name.lower() or "fidélité" in program_name.lower():
+                    return {
+                        "card_number": card.get("code", ""),
+                        "program_name": program_name,
+                        "point_name": card.get("point_name", "pts"),
+                        "current_points": card.get("points", 0),
+                        "previous_points": None,
+                        "points_earned": None,
+                        "points_used": points_used_from_lines,
+                    }
+                    
         except Exception as e:
             # Module loyalty non installé ou erreur
             print(f"Données fidélité non disponibles: {e}")

@@ -22,6 +22,9 @@ patch(PaymentScreen.prototype, {
         const order = this.pos.get_order();
         if (!order) return;
 
+        // Attendre un court délai pour s'assurer que les données sont enregistrées dans Odoo
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
         this._printReceipt(order.name);
     },
 
