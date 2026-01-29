@@ -340,27 +340,30 @@ class ReceiptFormatter:
         add_text("Encaissement:")
         for payment in data.get("payments", []):
             if isinstance(payment, dict):
-                add_text(
-                    self.format_table_row(
-                        [
-                            {
-                                "text": f"  {payment.get('name', 'Paiement')}",
-                                "width": 0.65,
-                                "align": "left",
-                            },
-                            {
-                                "text": self.format_money(
-                                    payment.get("amount", 0), currency, currency_pos
-                                ),
-                                "width": 0.35,
-                                "align": "right",
-                            },
-                        ]
+                amount = payment.get("amount", 0)
+                if amount and float(amount) > 0:
+                    add_text(
+                        self.format_table_row(
+                            [
+                                {
+                                    "text": f"  {payment.get('name', 'Paiement')}",
+                                    "width": 0.65,
+                                    "align": "left",
+                                },
+                                {
+                                    "text": self.format_money(
+                                        amount, currency, currency_pos
+                                    ),
+                                    "width": 0.35,
+                                    "align": "right",
+                                },
+                            ]
+                        )
                     )
-                )
 
         # === RENDU MONNAIE ===
         change = data.get("change", 0)
+        print(f"Debug - Rendu monnaie: {change}")
         if change and float(change) > 0:
             add_text("")
             add_text(
@@ -375,47 +378,6 @@ class ReceiptFormatter:
                     ]
                 )
             )
-
-        # === RECAP TVA ===
-        # if tax_details:
-        #     add_text(self.separator())
-        #     add_text(
-        #         self.format_table_row(
-        #             [
-        #                 {"text": "TAUX", "width": 0.20, "align": "left"},
-        #                 {"text": "HT", "width": 0.25, "align": "left"},
-        #                 {"text": "TVA", "width": 0.25, "align": "left"},
-        #                 {"text": "TTC", "width": 0.30, "align": "left"},
-        #             ]
-        #         )
-        #     )
-        #     for tax in tax_details:
-        #         add_text(
-        #             self.format_table_row(
-        #                 [
-        #                     {
-        #                         "text": f"{tax.get('rate', 0)}%",
-        #                         "width": 0.20,
-        #                         "align": "left",
-        #                     },
-        #                     {
-        #                         "text": f"{tax.get('base', 0):.2f}",
-        #                         "width": 0.25,
-        #                         "align": "left",
-        #                     },
-        #                     {
-        #                         "text": f"{tax.get('amount', 0):.2f}",
-        #                         "width": 0.25,
-        #                         "align": "left",
-        #                     },
-        #                     {
-        #                         "text": f"{tax.get('total', 0):.2f}",
-        #                         "width": 0.30,
-        #                         "align": "left",
-        #                     },
-        #                 ]
-        #             )
-        #         )
 
         # === PROGRAMME FIDÉLITÉ ===
         loyalty = data.get("loyalty")
@@ -432,7 +394,7 @@ class ReceiptFormatter:
             add_text(self.separator("-"))
 
             if loyalty.get("previous_points") is not None:
-                add_text(f"Solde precedent: {loyalty['previous_points']:.1f} pts")
+                add_text(f"Points de fidélité : {loyalty['previous_points']:.1f} pts")
             if loyalty.get("points_earned") is not None and loyalty["points_earned"] > 0:
                 add_text(f"Points gagnes: +{loyalty['points_earned']:.1f} pts")
             if loyalty.get("points_used") is not None and loyalty["points_used"] > 0:
