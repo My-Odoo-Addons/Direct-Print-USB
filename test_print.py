@@ -6,7 +6,7 @@ client = OdooClient()
 client.connect()
 
 order = input('Numéro de commande à imprimer: ')
-data = client.get_order_data('Restaurant/' + order)
+data = client.get_order_data(order)
 if data:
     formatter = ReceiptFormatter()
     ticket = formatter.format_receipt(data)

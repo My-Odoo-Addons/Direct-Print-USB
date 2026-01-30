@@ -403,8 +403,6 @@ class ReceiptFormatter:
         # === MONNAIE RENDUE ===
         change = data.get("change", 0)
         if change > 0:
-            add_text("")
-            add_text("Monnaie rendu:")
             add_text(
                 self.format_table_row(
                     [
@@ -429,35 +427,30 @@ class ReceiptFormatter:
             add_text("")
             add_cmd(escpos.BOLD_ON)
             add_cmd(escpos.ALIGN_CENTER)
-            add_text("******** VOTRE COMPTE FIDELITE ********")
+            add_text("******** VOTRE COMPTE FIDÉLITÉ ********")
             add_cmd(escpos.BOLD_OFF)
             add_cmd(escpos.ALIGN_LEFT)
 
-            if loyalty.get("card_number"):
-                add_text(f"Numero Carte: {loyalty['card_number']}")
+            add_text(f"Numéro Carte: {loyalty['card_number']}")
             add_text(self.separator("-"))
 
-            if loyalty.get("previous_points") is not None:
+            if loyalty.get("previous_points") is not None and loyalty["previous_points"] > 0:
                 add_text(f"Points de fidélité : {loyalty['previous_points']:.1f} pts")
             if loyalty.get("points_earned") is not None and loyalty["points_earned"] > 0:
-                add_text(f"Points gagnes: +{loyalty['points_earned']:.1f} pts")
+                add_text(f"Points gagnés: +{loyalty['points_earned']:.1f} pts")
             if loyalty.get("points_used") is not None and loyalty["points_used"] > 0:
-                add_text(f"Points utilises: {loyalty['points_used']:.1f} pts")
+                add_text(f"Points utilisés: {loyalty['points_used']:.1f} pts")
             if loyalty.get("current_points") is not None and loyalty.get("current_points") > 0:
                 add_cmd(escpos.BOLD_ON)
                 add_text(f"Nouveau solde: {loyalty['current_points']:.1f} pts")
                 add_cmd(escpos.BOLD_OFF)
 
-            add_cmd(escpos.BOLD_ON)
-            add_cmd(escpos.ALIGN_CENTER)
-            add_text("***************************************")
-            add_cmd(escpos.BOLD_OFF)
         elif not loyalty and LOYALTY_CONFIG.get("enabled", True):
             # Message pour inciter à prendre une carte fidélité
             add_text("")
             add_cmd(escpos.ALIGN_CENTER)
             add_cmd(escpos.BOLD_ON)
-            add_text("*** PAS DE CARTE FIDELITE ? ***")
+            add_text("*** PAS DE CARTE FIDÉLITÉ ? ***")
             add_cmd(escpos.BOLD_OFF)
             add_text("Demandez votre carte, elle est gratuite!")
             add_cmd(escpos.ALIGN_LEFT)
@@ -488,15 +481,90 @@ class ReceiptFormatter:
 
         # === CODE-BARRES EAN-13 ===
         if self.print_barcode and data.get("order_name"):
-            add_cmd(escpos.FEED_LINES(2))
+            add_cmd(escpos.FEED_LINES(1))
             add_cmd(escpos.ALIGN_CENTER)
-            barcode_data = data.get("barcode") or data.get("order_name")
-            barcode_cmd = escpos.barcode_ean13(barcode_data)
-            add_cmd(barcode_cmd)
+            add_text("CODE-BARRES COMMANDE")
+            add_cmd(escpos.FEED_LINES(1))
+            barcode_data = self._generate_barcode_data(data)
+            if barcode_data:
+                barcode_cmd = escpos.barcode_ean13(barcode_data)
+                add_cmd(barcode_cmd)
 
         # === AVANCE PAPIER ET COUPE ===
         add_cmd(escpos.FEED_LINES(4))
         add_cmd(escpos.CUT_PAPER)
+
+    def _generate_barcode_data(self, data):
+        """Génère les données du code-barres EAN-13 contenant id magasin, numéro caisse, date et heure compactes, et numéro commande"""
+        try:
+            # 1. ID magasin (company_id) - 2 chiffres
+            company_id = data.get("company_id", 1)
+            store_id = str(company_id).zfill(2)[-2:]  # 2 derniers chiffres
+
+            # 2. Numéro de caisse - 2 chiffres
+            pos_config = data.get("pos_config_name", "")
+            if pos_config:
+                # Extraire les chiffres du nom de config (ex: "POS/001" -> "01")
+                import re
+                numbers = re.findall(r'\d+', pos_config)
+                if numbers:
+                    register_num = str(int(numbers[-1])).zfill(2)[-2:]
+                else:
+                    register_num = "01"  # Défaut
+            else:
+                # Utiliser l'id de l'utilisateur comme fallback
+                user_id = data.get("user_id", [1])[0] if isinstance(data.get("user_id"), list) else 1
+                register_num = str(user_id).zfill(2)[-2:]
+
+            # 3. Date compacte (MMDD) - 4 chiffres
+            from datetime import datetime
+            date_order = data.get("date_order")
+            if date_order:
+                if isinstance(date_order, str):
+                    dt = datetime.fromisoformat(date_order.replace('Z', '+00:00'))
+                else:
+                    dt = date_order
+                date_str = dt.strftime("%m%d")  # MMDD
+            else:
+                date_str = "0129"  # Date par défaut
+
+            # 4. Heure compacte (HHMM) - 4 chiffres
+            if date_order:
+                if isinstance(date_order, str):
+                    dt = datetime.fromisoformat(date_order.replace('Z', '+00:00'))
+                else:
+                    dt = date_order
+                time_str = dt.strftime("%H%M")  # HHMM
+            else:
+                time_str = "1125"
+
+            # 5. ID commande - 4 chiffres (utiliser l'ID réel de pos_order)
+            order_id = data.get("order_id", 0)
+            if order_id:
+                order_id_str = str(order_id).zfill(4)[-4:]
+            # else:
+            #     # Fallback vers l'extraction du nom
+            #     order_name = data.get("order_name", "")
+            #     if order_name:
+            #         import re
+            #         numbers = re.findall(r'\d+', order_name)
+            #         if numbers:
+            #             order_id_str = str(int(numbers[-1])).zfill(4)[-4:]
+            #         else:
+            #             order_id_str = "0001"
+            #     else:
+            #         order_id_str = "0001"
+
+            # Combiner: store_id (2) + register_num (2) + date_str (4) + order_id_str (4) = 12 chiffres
+            barcode_str = f"{store_id}{register_num}{date_str}{order_id_str}"
+            
+            return barcode_str
+            
+        except Exception as e:
+            print(f"Erreur génération code-barres: {e}")
+            # Fallback: utiliser le numéro de commande
+            order_name = data.get("order_name", "0000000000001")
+            return order_name.replace('/', '').replace('-', '')[:12].zfill(12)
 
     # === MÉTHODE PRINCIPALE ===
 

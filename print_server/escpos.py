@@ -62,6 +62,28 @@ def barcode_ean13(data):
     digits = "".join(filter(str.isdigit, str(data)))[:12]
     digits = digits.zfill(12)
 
+    # Configuration + impression - TAILLE AUGMENTÉE
+    return (
+        barcode_height(100)  # Augmenté de 80 à 100
+        + barcode_width(3)   # Augmenté de 2 à 3
+        + barcode_text_position(2)
+        + barcode_font(0)
+        + GS
+        + "k"
+        + "\x02"  # Type EAN-13 (format A)
+        + digits
+        + "\x00"  # Données + NUL terminator
+    )
+
+
+def barcode_code39(data):
+    """
+    Génère un code-barres Code 39
+    data: chaîne alphanumérique (jusqu'à 32 caractères)
+    """
+    # Limiter à 32 caractères maximum et convertir en majuscules
+    data_str = str(data).upper()[:32]
+
     # Configuration + impression
     return (
         barcode_height(80)
@@ -70,9 +92,9 @@ def barcode_ean13(data):
         + barcode_font(0)
         + GS
         + "k"
-        + "\x02"  # Type EAN-13 (format A)
-        + digits
-        + "\x00"  # Données + NUL terminator
+        + "\x04"  # Type Code 39
+        + data_str
+        + "\x00"  # NUL terminator
     )
 
 # IMPRESSION D'IMAGES / LOGO

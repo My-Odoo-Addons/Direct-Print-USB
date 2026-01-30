@@ -77,6 +77,7 @@ class OdooClient:
                 "company_id",
                 "table_id",
                 "customer_count",
+                "session_id",
             ],
             limit=1,
         )
@@ -130,6 +131,9 @@ class OdooClient:
         # Récupérer le client
         customer = self._get_partner_name(order.get("partner_id"))
 
+        # Récupérer le numéro de caisse
+        pos_config_name = self._get_pos_config_name(order.get("session_id"))
+
         # Calculer le rendu de monnaie
         # Utiliser la somme des paiements positifs pour éviter les problèmes avec amount_paid
         total_paid_positive = sum(p.get("amount", 0) for p in payments if p.get("amount", 0) > 0)
@@ -165,12 +169,15 @@ class OdooClient:
 
         # Construire les données du ticket
         return {
+            "order_id": order_id,
             "order_name": order.get("pos_reference") or order.get("name"),
             "date_order": order.get("date_order"),
+            "company_id": order.get("company_id", [0])[0] if order.get("company_id") else 0,
             "company_name": company.get("name", ""),
             "company_phone": company.get("phone", ""),
             "company_email": company.get("email", ""),
             "company_website": company.get("website", ""),
+            "pos_config_name": pos_config_name,
             "cashier": cashier,
             "customer": customer,
             "table": order["table_id"][1] if order.get("table_id") else "",
@@ -288,6 +295,31 @@ class OdooClient:
         pid = partner_id[0] if isinstance(partner_id, (list, tuple)) else partner_id
         partners = self.search_read("res.partner", [("id", "=", pid)], ["name"], limit=1)
         return partners[0]["name"] if partners else ""
+
+    def _get_pos_config_name(self, session_id):
+        """Récupère le nom de la configuration POS depuis la session"""
+        if not session_id:
+            return ""
+
+        sid = session_id[0] if isinstance(session_id, (list, tuple)) else session_id
+        sessions = self.search_read(
+            "pos.session", 
+            [("id", "=", sid)], 
+            ["config_id"], 
+            limit=1
+        )
+        
+        if sessions and sessions[0].get("config_id"):
+            config_id = sessions[0]["config_id"][0]
+            configs = self.search_read(
+                "pos.config", 
+                [("id", "=", config_id)], 
+                ["name"], 
+                limit=1
+            )
+            return configs[0]["name"] if configs else ""
+        
+        return ""
 
     def _get_tax_details(self, lines, order_tax=0):
         """
