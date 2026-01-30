@@ -189,6 +189,7 @@ class OdooClient:
                     ),
                     "qty": line.get("qty", 1),
                     "price": line.get("price_unit", 0),
+                    "standard_price": self._get_product_standard_price(line.get("product_id", [0])[0]) if line.get("product_id") else 0,
                     "subtotal": line.get("price_subtotal_incl", 0),
                     "discount": line.get("discount", 0),
                     "is_free": line.get("price_subtotal_incl", 0) == 0,
@@ -317,8 +318,23 @@ class OdooClient:
                 ["name"], 
                 limit=1
             )
-            return configs[0]["name"] if configs else ""
+        return configs[0]["name"] if configs else ""
+    
+    def _get_product_standard_price(self, product_id):
+        """Récupère le prix standard d'un produit"""
+        if not product_id:
+            return 0
         
+        try:
+            products = self.search_read(
+                "product.product", 
+                [("id", "=", product_id)], 
+                ["list_price"], 
+                limit=1
+            )
+            return products[0]["list_price"] if products else 0
+        except Exception:
+            return 0    
         return ""
 
     def _get_tax_details(self, lines, order_tax=0):

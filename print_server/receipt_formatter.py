@@ -181,10 +181,16 @@ class ReceiptFormatter:
         for item in normal_lines:
             name = item.get("name", "Produit")
             qty = item.get("qty", 1)
-            price = item.get("price", 0)  # Prix unitaire TTC
+            price = item.get("price", 0)  # Prix unitaire TTC appliqué
+            standard_price = item.get("standard_price", 0)  # Prix standard TTC
             subtotal = item.get("subtotal", qty * price)  # Total TTC
-            discount = item.get("discount", 0)
+            discount = item.get("discount", 0)  # Remise explicite (%)
             is_free = item.get("is_free", False)
+
+            # Calculer la remise de pricelist si le prix appliqué < prix standard
+            pricelist_discount = 0
+            if standard_price > 0 and price < standard_price and discount == 0:
+                pricelist_discount = ((standard_price - price) / standard_price) * 100
 
             # Ligne 1: (Qté) Nom produit ... TTC (en gras)
             qty_str = f"({int(qty)})"
@@ -205,6 +211,12 @@ class ReceiptFormatter:
                 )
             )
             add_cmd(escpos.BOLD_OFF)
+
+            # Afficher la remise si elle existe (explicite ou pricelist)
+            effective_discount = discount if discount > 0 else pricelist_discount
+            if effective_discount > 0 and not is_free:
+                discount_amount = (price * qty * effective_discount / 100)
+                add_text(f"   Remise {effective_discount:.0f}% (-{self.format_money(discount_amount, currency, currency_pos)})")
 
             # Saut de ligne avant le prochain produit
             add_text("")
@@ -253,7 +265,24 @@ class ReceiptFormatter:
 
 
         # === TOTAL SANS REMISE ===
-        if data.get("total_before_discount"):
+        # Calculer le vrai total sans aucune remise (prix standards TTC)
+        total_sans_remise = 0
+
+        for item in data.get("lines", []):
+            if isinstance(item, dict):
+                standard_price = item.get("standard_price", 0)
+                qty = item.get("qty", 1)
+                if standard_price > 0:
+                    # Calculer le taux de TVA pour cet article
+                    item_tax_rate = 0
+                    for tax in tax_details:
+                        if tax.get("rate", 0) > 0:
+                            item_tax_rate = tax["rate"] / 100
+                            break
+                    # Calcul TTC : prix HT standard × (1 + taux TVA)
+                    total_sans_remise += standard_price * qty * (1 + item_tax_rate)
+
+        if total_sans_remise > data.get("total", 0):
             add_text(
                 self.format_table_row(
                     [
@@ -263,7 +292,7 @@ class ReceiptFormatter:
                             "align": "left",
                         },
                         {
-                            "text": self.format_money(data["total_before_discount"], currency, currency_pos),
+                            "text": self.format_money(total_sans_remise, currency, currency_pos),
                             "width": 0.25,
                             "align": "right",
                         },
@@ -271,8 +300,96 @@ class ReceiptFormatter:
                 )
             )
 
+
+        # # === TOTAL AVANT REMISE GLOBALE ===
+        # if data.get("total_before_discount"):
+        #     add_text(
+        #         self.format_table_row(
+        #             [
+        #                 {
+        #                     "text": "TOTAL AVANT REMISE GLOBALE",
+        #                     "width": 0.55,
+        #                     "align": "left",
+        #                 },
+        #                 {
+        #                     "text": self.format_money(data["total_before_discount"], currency, currency_pos),
+        #                     "width": 0.25,
+        #                     "align": "right",
+        #                 },
+        #             ]
+        #         )
+        #     )
+
         # === TOTAL DES REMISES ===
-        if data.get("total_discount") and data["total_discount"] > 0:
+        # Calculer le total des remises individuelles sur les produits
+        individual_discounts_total = 0
+        for item in data.get("lines", []):
+            price = item.get("price", 0)
+            standard_price = item.get("standard_price", 0)
+            qty = item.get("qty", 1)
+            discount = item.get("discount", 0)
+
+            # Remise explicite
+            if discount > 0:
+                individual_discounts_total += (price * qty * discount / 100)
+            # Remise de pricelist (comparer prix TTC)
+            elif standard_price > 0:
+                # Calculer le taux de TVA moyen pour convertir le prix standard HT en TTC
+                item_tax_rate = 0
+                for tax in tax_details:
+                    if tax.get("rate", 0) > 0:
+                        item_tax_rate = tax["rate"] / 100
+                        break
+                standard_price_ttc = standard_price * (1 + item_tax_rate)
+
+                if price < standard_price_ttc:
+                    discount_pct = ((standard_price_ttc - price) / standard_price_ttc) * 100
+                    individual_discounts_total += (price * qty * discount_pct / 100)
+
+        # Remise globale (depuis Odoo)
+        global_discount = data.get("total_discount") or 0
+
+        # Afficher les remises individuelles si présentes
+        if individual_discounts_total > 0:
+            add_text(
+                self.format_table_row(
+                    [
+                        {
+                            "text": "REMISES SUR PRODUITS",
+                            "width": 0.55,
+                            "align": "left",
+                        },
+                        {
+                            "text": f"{self.format_money(individual_discounts_total, currency, currency_pos)}",
+                            "width": 0.25,
+                            "align": "right",
+                        },
+                    ]
+                )
+            )
+
+        # Afficher la remise globale si présente
+        if global_discount > 0:
+            add_text(
+                self.format_table_row(
+                    [
+                        {
+                            "text": "REMISE GLOBALE",
+                            "width": 0.55,
+                            "align": "left",
+                        },
+                        {
+                            "text": f"{self.format_money(global_discount, currency, currency_pos)}",
+                            "width": 0.25,
+                            "align": "right",
+                        },
+                    ]
+                )
+            )
+
+        # Afficher le total des remises si au moins une remise présente
+        total_discount_display = global_discount + individual_discounts_total
+        if total_discount_display > 0:
             add_text(
                 self.format_table_row(
                     [
@@ -282,7 +399,7 @@ class ReceiptFormatter:
                             "align": "left",
                         },
                         {
-                            "text": f"{self.format_money(data['total_discount'], currency, currency_pos)}",
+                            "text": f"{self.format_money(total_discount_display, currency, currency_pos)}",
                             "width": 0.25,
                             "align": "right",
                         },
@@ -571,7 +688,9 @@ class ReceiptFormatter:
         # Formater chaque section du ticket
         self._format_header(output, data)
         discount_lines = self._format_products(output, data, tax_details, currency, currency_pos)
-        self._format_discounts(output, discount_lines)
+        # N'afficher les messages de remise que s'il y a une remise globale
+        if data.get("total_discount") and data["total_discount"] > 0:
+            self._format_discounts(output, discount_lines)
         self._format_totals(output, data, tax_details, currency, currency_pos)
         self._format_payments(output, data, currency, currency_pos)
         self._format_loyalty(output, data)
