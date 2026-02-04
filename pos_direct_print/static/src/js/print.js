@@ -1,39 +1,62 @@
 /** @odoo-module */
 
-//Interception de la validation de la commande pour envoyer les données à l'imprimante via WebSocket
+/**
+ * Module d'impression directe POS
+ * Intercepte la validation de commande pour envoyer à l'imprimante via WebSocket
+ */
 
 import { patch } from "@web/core/utils/patch";
 import { PaymentScreen } from "@point_of_sale/app/screens/payment_screen/payment_screen";
 
-// Configuration du serveur d'impression
-const CONFIG = {
-    HTTP_PORT: 8766,      // Port de l'API HTTP (détection serveur)
-    WS_PORT: 8765,        // Port WebSocket
-    TIMEOUT: 2000,        // Timeout en ms
+// Valeurs par défaut (utilisées si config Odoo non disponible)
+const DEFAULT_CONFIG = {
+    HTTP_PORT: 8766,
+    WS_PORT: 8765,
+    TIMEOUT: 3000,
 };
 
-// Cache pour l'URL du serveur (évite de re-détecter à chaque impression)
+// Cache pour l'URL du serveur
 let cachedServerUrl = null;
 
 patch(PaymentScreen.prototype, {
+    
+    /**
+     * Récupère la configuration depuis pos.config
+     */
+    _getDirectPrintConfig() {
+        const config = this.pos.config;
+        return {
+            enabled: config.use_direct_print || false,
+            host: config.direct_print_host ,//|| "localhost",
+            httpPort: DEFAULT_CONFIG.HTTP_PORT,
+            wsPort: DEFAULT_CONFIG.WS_PORT,
+            timeout: DEFAULT_CONFIG.TIMEOUT,
+        };
+    },
+
     async validateOrder(isForceValidate) {
         await super.validateOrder(isForceValidate);
 
         const order = this.pos.get_order();
         if (!order) return;
 
-        // Attendre un court délai pour s'assurer que les données sont enregistrées dans Odoo
+        // Vérifier si l'impression directe est activée
+        const printConfig = this._getDirectPrintConfig();
+        if (!printConfig.enabled) {
+            console.log("ℹ Impression directe désactivée dans la config POS");
+            return;
+        }
+
+        // Attendre que les données soient enregistrées dans Odoo
         await new Promise(resolve => setTimeout(resolve, 500));
         
-        this._printReceipt(order.name);
+        this._printReceipt(order.name, printConfig);
     },
 
     /**
      * Découvre le serveur d'impression via l'API HTTP
-     * @returns {Promise<string>} L'URL WebSocket du serveur
      */
-    async _discoverPrintServer() {
-        // Utiliser le cache si disponible
+    async _discoverPrintServer(config) {
         if (cachedServerUrl) {
             return cachedServerUrl;
         }
@@ -41,15 +64,14 @@ patch(PaymentScreen.prototype, {
         const ipsToTry = [
             "localhost",
             "127.0.0.1",
-            window.location.hostname
-        ];
+        ].filter((v, i, a) => a.indexOf(v) === i); // Dédupliquer
 
         for (const ip of ipsToTry) {
             try {
                 const response = await Promise.race([
-                    fetch(`http://${ip}:${CONFIG.HTTP_PORT}/info`),
+                    fetch(`http://${ip}:${config.httpPort}/info`),
                     new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error("Timeout")), CONFIG.TIMEOUT)
+                        setTimeout(() => reject(new Error("Timeout")), config.timeout)
                     )
                 ]);
 
@@ -64,32 +86,35 @@ patch(PaymentScreen.prototype, {
             }
         }
 
-        // Fallback si aucun serveur trouvé
-        // const fallbackUrl = `ws://${CONFIG.FALLBACK_IP}:${CONFIG.WS_PORT}`;
-        // console.warn("⚠ Serveur non détecté, utilisation de:", fallbackUrl);
-        // return fallbackUrl;
+        // Fallback: construire l'URL depuis la config
+        const fallbackUrl = `ws://${config.host}:${config.wsPort}`;
+        console.warn("⚠ Serveur non détecté via /info, fallback:", fallbackUrl);
+        return fallbackUrl;
     },
 
     /**
      * Envoie une demande d'impression au serveur
-     * @param {string} orderName - Nom de la commande à imprimer
      */
-    async _printReceipt(orderName) {
+    async _printReceipt(orderName, config) {
         try {
-            const wsUrl = await this._discoverPrintServer();
+            const wsUrl = await this._discoverPrintServer(config);
             const ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
                 const payload = { type: "print", order_name: orderName };
                 ws.send(JSON.stringify(payload));
-                ws.close();
                 console.log("✓ Impression demandée:", orderName);
+                // Fermer après un court délai pour s'assurer que le message est envoyé
+                setTimeout(() => ws.close(), 100);
             };
 
             ws.onerror = (error) => {
                 console.error("✗ Erreur WebSocket:", error);
-                // Invalider le cache pour re-détecter au prochain essai
                 cachedServerUrl = null;
+            };
+
+            ws.onclose = () => {
+                // Connexion fermée normalement
             };
         } catch (error) {
             console.error("✗ Erreur d'impression:", error);
