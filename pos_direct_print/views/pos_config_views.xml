@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="pos_config_view_form_direct_print" model="ir.ui.view">
+        <field name="name">pos.config.form.direct.print</field>
+        <field name="model">pos.config</field>
+        <field name="inherit_id" ref="point_of_sale.pos_config_view_form"/>
+        <field name="arch" type="xml">
+            <!-- Section Impression Directe -->
+            <xpath expr="//sheet" position="inside">
+                <group string="Impression Directe USB" name="direct_print_group">
+                    <!-- Activation -->
+                    <group>
+                        <field name="use_direct_print" widget="boolean_toggle"/>
+                    </group>
+                    
+                    <!-- Configuration Agent (visible si activé) -->
+                    <!-- <group string="Connexion Agent" invisible="not use_direct_print" col="2"> -->
+                        <!-- <field name="direct_print_host" placeholder="192.168.2.41"/> -->
+                        <!-- <field name="direct_print_port"/> -->
+                    <!-- </group> -->
+                    
+                    <!-- Configuration Imprimante -->
+                    <group string="Imprimante" invisible="not use_direct_print" col="2">
+                        <!-- <field name="direct_print_printer_name" placeholder="POS80"/> -->
+                        <field name="direct_print_width"/>
+                        <field name="direct_print_encoding"/>
+                    </group>
+                    
+                    <!-- Options du ticket -->
+                    <group string="Options du ticket" invisible="not use_direct_print" col="4">
+                        <field name="direct_print_logo"/>
+                        <field name="direct_print_barcode"/>
+                        <field name="direct_print_show_loyalty"/>
+                    </group>
+                    
+                    <!-- Messages personnalisables -->
+                    <group string="Messages" invisible="not use_direct_print" col="2">
+                        <field name="direct_print_footer" placeholder="Merci de votre visite !"/>
+                        <field name="direct_print_goodbye" placeholder="A bientôt !"/>
+                    </group>
+                </group>
+            </xpath>
+        </field>
+    </record>
+</odoo>

@@ -1,0 +1,14 @@
+# Dépendances Python pour l'Agent d'Impression POS
+
+# Communication réseau
+websockets>=12.0
+aiohttp>=3.9.0
+
+# Windows uniquement - pour l'impression via API Windows
+pywin32>=306 ; platform_system == "Windows"
+
+# Note: tkinter est inclus avec Python sur la plupart des distributions
+# Si vous avez une erreur "No module named 'tkinter'":
+# - Windows: tkinter est inclus par défaut
+# - Linux Ubuntu/Debian: sudo apt-get install python3-tk
+# - Linux Fedora: sudo dnf install python3-tkinter
