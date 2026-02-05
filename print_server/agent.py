@@ -119,7 +119,7 @@ class PrintAgent:
         displayed_printer = getattr(self.printer, 'printer_name', None)
         if not displayed_printer:
             try:
-                displayed_printer = detect_printer()
+                displayed_printer = Printer.detect_printer()
             except Exception:
                 displayed_printer = None
 
