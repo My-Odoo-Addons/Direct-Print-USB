@@ -66,15 +66,17 @@ class PrintAgentGUI:
         ttk.Label(config_frame, text="URL Odoo:").grid(
             row=0, column=0, sticky=tk.W, padx=(0, 10)
         )
-        self.odoo_url_var = tk.StringVar()
-        odoo_entry = ttk.Entry(
-            config_frame,
-            textvariable=self.odoo_url_var,
-            width=50,
-            placeholder="http://host:port",
-        )
-        odoo_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5)
+        # Frame pour URL
+        url_frame = ttk.Frame(config_frame)
+        url_frame.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5)
+        url_frame.columnconfigure(0, weight=1)
 
+        self.odoo_url_var = tk.StringVar()
+        self.odoo_combo = ttk.Combobox(url_frame, textvariable=self.odoo_url_var)
+        self.odoo_combo.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 5))
+        refresh_url_btn = ttk.Button(
+            url_frame, text="Rafraîchir", width=3, command=self._load_config
+        )
         # Imprimante
         ttk.Label(config_frame, text="Imprimante:").grid(
             row=1, column=0, sticky=tk.W, padx=(0, 10)
@@ -220,10 +222,33 @@ class PrintAgentGUI:
                 with open(config_file, "r", encoding="utf-8") as f:
                     config_data = json.load(f)
 
-                # Appliquer les paramètres
-                self.odoo_url_var.set(
-                    config_data.get("current", {}).get("odoo_url", "")
-                )
+                # Extraire les URLs uniques de l'historique
+                history = config_data.get("history", [])
+                unique_urls = []
+                seen_urls = set()
+
+                # Parcourir l'historique du plus récent au plus ancien
+                for entry in reversed(history):  #  plus récents en premier
+                    url = entry.get("odoo_url").strip()
+                    # Ignorer les URLs vides ou déjà vues
+                    if url and url not in seen_urls:
+                        unique_urls.insert(
+                            0, url
+                        )  # Insérer au début (plus récent d'abord)
+                        seen_urls.add(url)
+
+                # Remplir le combobox avec les URLs uniques
+                if unique_urls:
+                    self.odoo_combo["values"] = unique_urls
+                    self._log(
+                        f"✓ {len(unique_urls)} URL(s) Odoo unique(s) en historique"
+                    )
+                else:
+                    self.odoo_combo["values"] = []
+
+                # Appliquer les paramètres actuels
+                current = config_data.get("current", {})
+                self.odoo_url_var.set(current.get("odoo_url"))
 
                 self._log(
                     f"✓ Configuration chargée (dernière utilisation: {config_data.get('current', {}).get('last_used', 'N/A')})"
