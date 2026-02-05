@@ -1,3 +1,5 @@
+from pathlib import Path
+
 # CONFIGURATION DE L'AGENT D'IMPRESSION
 # Seules les infos LOCALES sont ici (Odoo gère le reste)
 
@@ -24,3 +26,12 @@ WEBSOCKET_CONFIG = {
 # ============================================
 # PRINTER_NAME = "POS80"
 ENCODING = "cp437"
+
+# ============================================
+# SAVE/LOAD CONFIG
+# Le reste de la config (URL Odoo, nom imprimante) 
+# est géré dynamiquement dans gui.py et 
+# sauvegardé dans un fichier local
+# ============================================
+CONFIG_DIR = Path.home() / ".pos_agent"
+CONFIG_FILE = CONFIG_DIR / "config.json"
