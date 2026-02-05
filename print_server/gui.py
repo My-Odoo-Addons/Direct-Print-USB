@@ -4,6 +4,7 @@ INTERFACE GRAPHIQUE POUR L'AGENT D'IMPRESSION POS
 Compatible Windows et Linux
 """
 
+import json
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 import threading
@@ -16,7 +17,7 @@ import queue
 
 from .agent import get_local_ip
 from .printer import Printer
-from .config import WEBSOCKET_CONFIG
+from .config import WEBSOCKET_CONFIG, CONFIG_FILE, CONFIG_DIR
 
 
 class PrintAgentGUI:
@@ -166,16 +167,65 @@ class PrintAgentGUI:
 
     def _load_config(self):
         """Charge la configuration initiale"""
-        # URL Odoo
-        # L'URL Odoo peut provenir de la variable d'environnement ODOO_URL
-        self.odoo_url_var.set(os.environ.get('ODOO_URL', ''))
-        
-        # Charger les imprimantes
-        self._refresh_printers()
-        
+        config_file = CONFIG_FILE
+
+        # Charger depuis le fichier JSON si il existe
+        if config_file.exists():
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    config_data = json.load(f)
+                
+                # Appliquer les paramètres
+                self.odoo_url_var.set(config_data.get("odoo_url", ""))
+                
+                self._log(f"✓ Configuration chargée (dernière utilisation: {config_data.get('last_used', 'N/A')})")
+                
+                # Charger les imprimantes
+                self._refresh_printers()
+                
+                # Sélectionner l'imprimante sauvegardée si elle existe
+                saved_printer = config_data.get("printer_name")
+                if saved_printer and saved_printer in self.printer_combo['values']:
+                    self.printer_var.set(saved_printer)
+                
+            except Exception as e:
+                self._log(f"Erreur lors du chargement de la config: {e}", "warning")
+                # Fallback sur le comportement par défaut
+                self.odoo_url_var.set(os.environ.get('ODOO_URL', ''))
+                self._refresh_printers()
+        else:
+            # Pas de fichier de config, comportement par défaut
+            self.odoo_url_var.set(os.environ.get('ODOO_URL', ''))
+            self._refresh_printers()
+
         # IP locale
         local_ip = get_local_ip()
         self._log(f"IP locale détectée: {local_ip}")
+    
+    def _save_config(self):
+        """Sauvegarde les paramètres dans un fichier JSON"""
+        try:
+            # Créer le dossier s'il n'existe pas
+            config_dir = CONFIG_DIR
+            config_dir.mkdir(exist_ok=True)
+            
+            config_file = CONFIG_FILE
+            
+            # Préparer les données
+            config_data = {
+                "odoo_url": self.odoo_url_var.get(),
+                "printer_name": self.printer_var.get(),
+                "last_used": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            
+            # Écrire dans le fichier
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(config_data, f, indent=4)
+            
+            self._log("✓ Configuration sauvegardée")
+            
+        except Exception as e:
+            self._log(f"Impossible de sauvegarder la config: {e}", "warning")
 
     def _refresh_printers(self):
         """Rafraîchit la liste des imprimantes disponibles"""
@@ -404,6 +454,8 @@ class PrintAgentGUI:
 
     def _on_closing(self):
         """Gère la fermeture de l'application"""
+        # Sauvegarder la configuration avant de quitter
+        self._save_config()
         if self.is_running:
             if messagebox.askokcancel("Quitter", 
                 "L'agent est en cours d'exécution. Voulez-vous vraiment quitter?"):
