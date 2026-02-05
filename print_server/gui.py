@@ -270,21 +270,26 @@ class PrintAgentGUI:
                 except Exception:
                     config_data = {}
 
-            history = config_data.get("history", [])
-            history.append(
-                {
+            if (
+                config_data.get("current", {}).get("odoo_url")
+                != self.odoo_url_var.get()
+                or config_data.get("current", {}).get("printer_name")
+                != self.printer_var.get()
+            ):
+                history = config_data.get("history", [])
+                history.append(
+                    {
+                        "odoo_url": self.odoo_url_var.get(),
+                        "printer_name": self.printer_var.get(),
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                )
+                config_data["current"] = {
                     "odoo_url": self.odoo_url_var.get(),
                     "printer_name": self.printer_var.get(),
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "last_used": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 }
-            )
-
-            config_data["current"] = {
-                "odoo_url": self.odoo_url_var.get(),
-                "printer_name": self.printer_var.get(),
-                "last_used": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }
-            config_data["history"] = history
+                config_data["history"] = history
 
             # Écrire dans le fichier
             with open(config_file, "w", encoding="utf-8") as f:
