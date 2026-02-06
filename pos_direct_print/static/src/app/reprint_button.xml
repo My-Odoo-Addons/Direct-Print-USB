@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <!-- Hériter du template Navbar -->
+    <t t-name="pos_direct_print.NavbarButton" 
+       t-inherit="point_of_sale.Navbar" 
+       t-inherit-mode="extension">
+       
+        <!-- Ajouter le bouton dans la partie droite de la navbar -->
+        <xpath expr="//div[hasclass('pos-rightheader')]" position="inside">
+            <button class="btn btn-light reprint-receipt-btn" 
+                    t-on-click=""> 
+                    <!-- appel de la méthode dans reprint_button.js -->
+                <i class="fa fa-print"/> Réimprimer la dernière commande
+            </button>
+        </xpath>
+        
+    </t>
+
+</templates>    
