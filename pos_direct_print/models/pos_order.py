@@ -17,6 +17,8 @@ ALIGN_CENTER = ESC + "a\x01"
 SIZE_NORMAL = ESC + "!\x00"
 SIZE_DOUBLE_HEIGHT = ESC + "!\x10"
 CUT_PAPER = GS + "V\x00"
+OPEN_CASH_DRAWER = ESC + "p\x00\x19\xfa"
+OPEN_CASH_DRAWER_ALTERNATIVE = ESC + "p\x01\x19\xfa"
 
 
 def feed(n):
@@ -27,12 +29,23 @@ def barcode_ean13(data):
     """Génère un code-barres EAN-13"""
     digits = "".join(filter(str.isdigit, str(data)))[:12].zfill(12)
     return (
-        GS + "h" + chr(100) +
-        GS + "w" + chr(3) +
-        GS + "H" + chr(2) +
-        GS + "f" + chr(0) +
-        GS + "k" + "\x02" +
-        digits + "\x00"
+        GS
+        + "h"
+        + chr(100)
+        + GS
+        + "w"
+        + chr(3)
+        + GS
+        + "H"
+        + chr(2)
+        + GS
+        + "f"
+        + chr(0)
+        + GS
+        + "k"
+        + "\x02"
+        + digits
+        + "\x00"
     )
 
 
@@ -50,6 +63,7 @@ def convert_image_to_raster(image_binary, max_width=384):
     """Convertit une image en données raster pour imprimante thermique"""
     try:
         from PIL import Image
+
         img = Image.open(io.BytesIO(image_binary))
         img = img.convert("L")
         if img.width > max_width:
@@ -78,62 +92,75 @@ def convert_image_to_raster(image_binary, max_width=384):
 
 
 class PosOrder(models.Model):
-    _inherit = 'pos.order'
+    _inherit = "pos.order"
 
     def _get_loyalty_data(self):
         """Récupère les données complètes du programme fidélité"""
         if not self.partner_id:
             return None
-        
+
         try:
             # Chercher l'historique de fidélité pour cette commande
-            LoyaltyHistory = self.env['loyalty.history'].sudo()
-            history = LoyaltyHistory.search([('order_id', '=', self.id)])
-            
+            LoyaltyHistory = self.env["loyalty.history"].sudo()
+            history = LoyaltyHistory.search([("order_id", "=", self.id)])
+
             # Calculer les points utilisés depuis les lignes
             total_points_used = sum(
-                ln.points_cost or 0 for ln in self.lines if hasattr(ln, 'points_cost')
+                ln.points_cost or 0 for ln in self.lines if hasattr(ln, "points_cost")
             )
-            
+
             if history:
                 for h in history:
                     if h.card_id:
                         card = h.card_id
                         program_name = card.program_id.name if card.program_id else ""
-                        
+
                         # Privilégier le programme Loyalty (pas Gift Card)
-                        if "loyalty" in program_name.lower() or "fidélité" in program_name.lower():
+                        if (
+                            "loyalty" in program_name.lower()
+                            or "fidélité" in program_name.lower()
+                        ):
                             points_earned = h.issued or 0
-                            points_used = total_points_used if total_points_used > 0 else (h.used or 0)
+                            points_used = (
+                                total_points_used
+                                if total_points_used > 0
+                                else (h.used or 0)
+                            )
                             current_points = card.points or 0
-                            
+
                             return {
                                 "card_number": card.code or str(card.id),
                                 "program_name": program_name,
-                                "point_name": getattr(card, 'point_name', 'pts') or 'pts',
+                                "point_name": getattr(card, "point_name", "pts")
+                                or "pts",
                                 "current_points": current_points,
-                                "previous_points": current_points - points_earned + points_used,
+                                "previous_points": current_points
+                                - points_earned
+                                + points_used,
                                 "points_earned": points_earned,
                                 "points_used": points_used,
                             }
-            
+
             # Fallback: chercher carte fidélité du client
-            LoyaltyCard = self.env['loyalty.card'].sudo()
-            cards = LoyaltyCard.search([('partner_id', '=', self.partner_id.id)])
-            
+            LoyaltyCard = self.env["loyalty.card"].sudo()
+            cards = LoyaltyCard.search([("partner_id", "=", self.partner_id.id)])
+
             for card in cards:
                 program_name = card.program_id.name if card.program_id else ""
-                if "loyalty" in program_name.lower() or "fidélité" in program_name.lower():
+                if (
+                    "loyalty" in program_name.lower()
+                    or "fidélité" in program_name.lower()
+                ):
                     return {
                         "card_number": card.code or str(card.id),
                         "program_name": program_name,
-                        "point_name": getattr(card, 'point_name', 'pts') or 'pts',
+                        "point_name": getattr(card, "point_name", "pts") or "pts",
                         "current_points": card.points or 0,
                         "previous_points": None,
                         "points_earned": None,
                         "points_used": total_points_used,
                     }
-            
+
             # Aucune carte de type loyalty, retourner la première non-gift
             for card in cards:
                 program_name = card.program_id.name if card.program_id else ""
@@ -141,22 +168,22 @@ class PosOrder(models.Model):
                     return {
                         "card_number": card.code or str(card.id),
                         "program_name": program_name,
-                        "point_name": getattr(card, 'point_name', 'pts') or 'pts',
+                        "point_name": getattr(card, "point_name", "pts") or "pts",
                         "current_points": card.points or 0,
                         "previous_points": None,
                         "points_earned": None,
                         "points_used": total_points_used,
                     }
-                    
+
         except Exception:
             pass
-        
+
         return None
 
     def _get_loyalty_discount_pct(self):
         """Récupère le pourcentage de remise fidélité depuis les lignes reward"""
         for ln in self.lines:
-            if hasattr(ln, 'reward_id') and ln.reward_id:
+            if hasattr(ln, "reward_id") and ln.reward_id:
                 try:
                     discount = ln.reward_id.discount
                     if discount and discount > 0:
@@ -167,26 +194,26 @@ class PosOrder(models.Model):
 
     def _get_table_info(self):
         """Récupère les infos de table de façon sécurisée"""
-        if not hasattr(self, 'table_id') or not self.table_id:
+        if not hasattr(self, "table_id") or not self.table_id:
             return None
-        
+
         try:
             table = self.table_id
             # Essayer différents attributs pour le nom de la table
             table_name = None
-            for attr in ['table_number', 'name', 'display_name']:
+            for attr in ["table_number", "name", "display_name"]:
                 val = getattr(table, attr, None)
                 if val:
                     table_name = str(val)
                     break
             if not table_name:
                 table_name = str(table.id)
-            
+
             # Récupérer le nom de la salle
             floor_name = "Salle"
-            if hasattr(table, 'floor_id') and table.floor_id:
+            if hasattr(table, "floor_id") and table.floor_id:
                 floor_name = table.floor_id.name or "Salle"
-            
+
             return {
                 "floor": floor_name,
                 "table": table_name,
@@ -197,12 +224,12 @@ class PosOrder(models.Model):
     def _get_tax_details(self):
         """Récupère les détails des taxes par taux"""
         tax_totals = {}
-        
+
         for ln in self.lines:
             ht = ln.price_subtotal or 0
             ttc = ln.price_subtotal_incl or 0
             tax_amount = ttc - ht
-            
+
             # Déterminer le taux
             rate = 0
             if ln.tax_ids:
@@ -212,17 +239,22 @@ class PosOrder(models.Model):
                         break
             elif ht > 0:
                 rate = round((tax_amount / ht) * 100, 0)
-            
+
             if rate not in tax_totals:
                 tax_totals[rate] = {"base": 0, "amount": 0, "total": 0}
-            
+
             tax_totals[rate]["base"] += ht
             tax_totals[rate]["amount"] += tax_amount
             tax_totals[rate]["total"] += ttc
-        
+
         # Convertir en liste triée
         return [
-            {"rate": rate, "base": data["base"], "amount": data["amount"], "total": data["total"]}
+            {
+                "rate": rate,
+                "base": data["base"],
+                "amount": data["amount"],
+                "total": data["total"],
+            }
             for rate, data in sorted(tax_totals.items())
         ]
 
@@ -232,34 +264,44 @@ class PosOrder(models.Model):
         Utilise la configuration depuis pos.config.
         """
         self.ensure_one()
-        
+
         # Récupérer la configuration depuis pos.config
         config = self.config_id
         width = config.direct_print_width or 42
-        encoding = config.direct_print_encoding or 'cp437'
-        print_logo = config.direct_print_logo if config.direct_print_logo is not None else True
-        print_barcode = config.direct_print_barcode if config.direct_print_barcode is not None else True
-        show_loyalty = config.direct_print_show_loyalty if config.direct_print_show_loyalty is not None else True
+        encoding = config.direct_print_encoding or "cp437"
+        print_logo = (
+            config.direct_print_logo if config.direct_print_logo is not None else True
+        )
+        print_barcode = (
+            config.direct_print_barcode
+            if config.direct_print_barcode is not None
+            else True
+        )
+        show_loyalty = (
+            config.direct_print_show_loyalty
+            if config.direct_print_show_loyalty is not None
+            else True
+        )
         footer_message = config.direct_print_footer or "Merci de votre visite !"
         goodbye_message = config.direct_print_goodbye or "A bientôt !"
-        
+
         output = bytearray()
-        
+
         def to_bytes(text):
             if isinstance(text, bytes):
                 return text
-            return str(text).encode(encoding, errors='replace')
-        
+            return str(text).encode(encoding, errors="replace")
+
         def add(text):
             output.extend(to_bytes(text))
             output.extend(b"\n")
-        
+
         def cmd(c):
             if isinstance(c, bytes):
                 output.extend(c)
             else:
                 output.extend(to_bytes(c))
-        
+
         def table_row(columns):
             result = ""
             remaining = width
@@ -272,7 +314,7 @@ class PosOrder(models.Model):
                     col_width = remaining
                 remaining -= col_width
                 if len(text) > col_width:
-                    text = text[:col_width - 1] + "."
+                    text = text[: col_width - 1] + "."
                 if align == "right":
                     text = text.rjust(col_width)
                 elif align == "center":
@@ -281,10 +323,10 @@ class PosOrder(models.Model):
                     text = text.ljust(col_width)
                 result += text
             return result
-        
+
         def separator(char="-"):
             return char * width
-        
+
         def format_money(amount, symbol=None, position=None):
             currency = self.currency_id
             sym = symbol or currency.symbol or "Ar"
@@ -296,12 +338,12 @@ class PosOrder(models.Model):
             if pos == "before":
                 return f"{sym}{amount_str}"
             return f"{amount_str} {sym}"
-        
+
         company = self.company_id
-        
+
         # === INITIALISATION ===
         cmd(INIT_PRINTER)
-        
+
         # === LOGO ===
         if print_logo and company.logo:
             try:
@@ -314,48 +356,52 @@ class PosOrder(models.Model):
                     cmd(feed(2))
             except Exception:
                 pass
-        
+
         # === EN-TÊTE ===
         cmd(ALIGN_CENTER + BOLD_ON + SIZE_DOUBLE_HEIGHT)
         add(f"--- {company.name} ---")
         cmd(SIZE_NORMAL + BOLD_OFF)
-        
+
         if company.phone:
             add(f"Tel: {company.phone}")
         if company.email:
             add(company.email)
         if company.website:
             add(company.website)
-        
+
         add(separator())
         cmd(ALIGN_LEFT)
-        
+
         # === INFOS TICKET ===
         add(f"Date : {self.date_order.strftime('%d/%m/%Y %H:%M')}")
         add(f"Caisse : {self.config_id.name} (ID:{self.config_id.id})")
-        
+
         if self.user_id:
             add(f"Caissier: {self.user_id.name}")
         if self.partner_id:
             add(f"Client: {self.partner_id.name}")
-        
+
         # Restaurant: Table et couverts
         table_info = self._get_table_info()
         if table_info:
             add(f"Salle : {table_info['floor']} - Table : {table_info['table']}")
-            if hasattr(self, 'customer_count') and self.customer_count:
+            if hasattr(self, "customer_count") and self.customer_count:
                 add(f"Couvert(s): {self.customer_count}")
-        
+
         add(separator())
-        
+
         # === PRODUITS ===
         cmd(BOLD_ON)
-        add(table_row([
-            {"text": "ARTICLES", "width": 0.55, "align": "left"},
-            {"text": "Totals TTC", "width": 0.25, "align": "right"},
-        ]))
+        add(
+            table_row(
+                [
+                    {"text": "ARTICLES", "width": 0.55, "align": "left"},
+                    {"text": "Totals TTC", "width": 0.25, "align": "right"},
+                ]
+            )
+        )
         cmd(BOLD_OFF)
-        
+
         # Calculer taux de taxe principal
         tax_rate = 0
         for ln in self.lines:
@@ -365,26 +411,26 @@ class PosOrder(models.Model):
                         tax_rate = tax.amount / 100
                         break
                 break
-        
+
         total_sans_remise = 0
         individual_discounts = 0
-        
+
         # Séparer lignes normales et lignes de remise
         normal_lines = []
         discount_lines = []
-        
+
         for ln in self.lines:
-            is_reward = hasattr(ln, 'is_reward_line') and ln.is_reward_line
+            is_reward = hasattr(ln, "is_reward_line") and ln.is_reward_line
             is_discount_line = ln.price_unit < 0 and any(
-                word in (ln.product_id.name or "").lower() 
+                word in (ln.product_id.name or "").lower()
                 for word in ["remise", "discount", "%", "sur votre"]
             )
-            
+
             if is_reward or is_discount_line:
                 discount_lines.append(ln)
             else:
                 normal_lines.append(ln)
-        
+
         # Afficher les produits normaux
         for ln in normal_lines:
             qty = int(ln.qty)
@@ -393,43 +439,61 @@ class PosOrder(models.Model):
             discount = ln.discount or 0
             standard_price = ln.product_id.lst_price if ln.product_id else 0
             price_unit = ln.price_unit
-            
+
             # Calculer remise pricelist
             pricelist_discount = 0
             if standard_price > 0 and price_unit < standard_price and discount == 0:
-                pricelist_discount = ((standard_price - price_unit) / standard_price) * 100
-            
+                pricelist_discount = (
+                    (standard_price - price_unit) / standard_price
+                ) * 100
+
             # Total sans remise
             standard_price_ttc = standard_price * (1 + tax_rate)
             total_sans_remise += standard_price_ttc * qty
-            
+
             # Vérifier si produit offert
-            is_free = subtotal == 0 or (hasattr(ln, 'is_reward_line') and ln.is_reward_line and subtotal == 0)
-            
+            is_free = subtotal == 0 or (
+                hasattr(ln, "is_reward_line") and ln.is_reward_line and subtotal == 0
+            )
+
             # Afficher la ligne
             cmd(BOLD_ON)
             if is_free:
-                add(table_row([
-                    {"text": f"({qty}) {name}", "width": 0.65, "align": "left"},
-                    {"text": "*OFFERT", "width": 0.35, "align": "right"},
-                ]))
+                add(
+                    table_row(
+                        [
+                            {"text": f"({qty}) {name}", "width": 0.65, "align": "left"},
+                            {"text": "*OFFERT", "width": 0.35, "align": "right"},
+                        ]
+                    )
+                )
             else:
-                add(table_row([
-                    {"text": f"({qty}) {name}", "width": 0.65, "align": "left"},
-                    {"text": format_money(subtotal), "width": 0.35, "align": "right"},
-                ]))
+                add(
+                    table_row(
+                        [
+                            {"text": f"({qty}) {name}", "width": 0.65, "align": "left"},
+                            {
+                                "text": format_money(subtotal),
+                                "width": 0.35,
+                                "align": "right",
+                            },
+                        ]
+                    )
+                )
             cmd(BOLD_OFF)
-            
+
             # Afficher remise si présente
             effective_discount = discount if discount > 0 else pricelist_discount
             if effective_discount > 0 and not is_free:
                 price_ttc = price_unit * (1 + tax_rate)
                 discount_amount = (standard_price_ttc - price_ttc) * qty
                 individual_discounts += discount_amount
-                add(f"   Remise {effective_discount:.0f}% (-{format_money(discount_amount)})")
-            
+                add(
+                    f"   Remise {effective_discount:.0f}% (-{format_money(discount_amount)})"
+                )
+
             add("")
-        
+
         # === REMISE GLOBALE (fidélité) ===
         loyalty_discount_pct = self._get_loyalty_discount_pct()
         if loyalty_discount_pct and loyalty_discount_pct > 0:
@@ -437,122 +501,219 @@ class PosOrder(models.Model):
             cmd(ALIGN_CENTER + BOLD_ON)
             add(f"Remise de {loyalty_discount_pct:.0f}% sur votre commande")
             cmd(BOLD_OFF + ALIGN_LEFT)
-        
+
         add(separator())
-        
+
         # === TOTAUX ===
-        
+
         # Total sans remise
         if total_sans_remise > self.amount_total + 0.01:
-            add(table_row([
-                {"text": "TOTAL SANS REMISE", "width": 0.55, "align": "left"},
-                {"text": format_money(total_sans_remise), "width": 0.25, "align": "right"},
-            ]))
-        
+            add(
+                table_row(
+                    [
+                        {"text": "TOTAL SANS REMISE", "width": 0.55, "align": "left"},
+                        {
+                            "text": format_money(total_sans_remise),
+                            "width": 0.25,
+                            "align": "right",
+                        },
+                    ]
+                )
+            )
+
         # Remises sur produits
         if individual_discounts > 0:
-            add(table_row([
-                {"text": "REMISES SUR PRODUITS", "width": 0.55, "align": "left"},
-                {"text": format_money(individual_discounts), "width": 0.25, "align": "right"},
-            ]))
-        
+            add(
+                table_row(
+                    [
+                        {
+                            "text": "REMISES SUR PRODUITS",
+                            "width": 0.55,
+                            "align": "left",
+                        },
+                        {
+                            "text": format_money(individual_discounts),
+                            "width": 0.25,
+                            "align": "right",
+                        },
+                    ]
+                )
+            )
+
         # Remise globale (fidélité)
         if loyalty_discount_pct and loyalty_discount_pct > 0:
             subtotal_before_global = total_sans_remise - individual_discounts
             global_discount = subtotal_before_global * (loyalty_discount_pct / 100)
             if global_discount > 0:
-                add(table_row([
-                    {"text": "REMISE GLOBALE", "width": 0.55, "align": "left"},
-                    {"text": format_money(global_discount), "width": 0.25, "align": "right"},
-                ]))
-        
+                add(
+                    table_row(
+                        [
+                            {"text": "REMISE GLOBALE", "width": 0.55, "align": "left"},
+                            {
+                                "text": format_money(global_discount),
+                                "width": 0.25,
+                                "align": "right",
+                            },
+                        ]
+                    )
+                )
+
         # Total des remises
         total_discount = individual_discounts
         if loyalty_discount_pct and loyalty_discount_pct > 0:
             subtotal_before_global = total_sans_remise - individual_discounts
             total_discount += subtotal_before_global * (loyalty_discount_pct / 100)
-        
+
         if total_discount > 0:
-            add(table_row([
-                {"text": "TOTAL DES REMISES", "width": 0.55, "align": "left"},
-                {"text": format_money(total_discount), "width": 0.25, "align": "right"},
-            ]))
-        
+            add(
+                table_row(
+                    [
+                        {"text": "TOTAL DES REMISES", "width": 0.55, "align": "left"},
+                        {
+                            "text": format_money(total_discount),
+                            "width": 0.25,
+                            "align": "right",
+                        },
+                    ]
+                )
+            )
+
         # Total à payer
         total_qty = sum(l.qty for l in self.lines if l.price_unit >= 0)
         cmd(BOLD_ON)
-        add(table_row([
-            {"text": f"TOTAL A PAYER ({int(total_qty)})", "width": 0.55, "align": "left"},
-            {"text": format_money(self.amount_total), "width": 0.25, "align": "right"},
-        ]))
+        add(
+            table_row(
+                [
+                    {
+                        "text": f"TOTAL A PAYER ({int(total_qty)})",
+                        "width": 0.55,
+                        "align": "left",
+                    },
+                    {
+                        "text": format_money(self.amount_total),
+                        "width": 0.25,
+                        "align": "right",
+                    },
+                ]
+            )
+        )
         cmd(BOLD_OFF)
-        
+
         # === DÉTAILS TAXES ===
         tax_details = self._get_tax_details()
         if tax_details and self.amount_tax > 0:
             add("")
-            add(table_row([
-                {"text": "TAUX", "width": 0.25, "align": "center"},
-                {"text": "HT", "width": 0.25, "align": "right"},
-                {"text": "TVA", "width": 0.25, "align": "right"},
-                {"text": "TTC", "width": 0.25, "align": "right"},
-            ]))
+            add(
+                table_row(
+                    [
+                        {"text": "TAUX", "width": 0.25, "align": "center"},
+                        {"text": "HT", "width": 0.25, "align": "right"},
+                        {"text": "TVA", "width": 0.25, "align": "right"},
+                        {"text": "TTC", "width": 0.25, "align": "right"},
+                    ]
+                )
+            )
             add(separator())
-            
+
             for tax in tax_details:
-                add(table_row([
-                    {"text": f"{tax['rate']:.0f}%", "width": 0.25, "align": "center"},
-                    {"text": format_money(tax['base']), "width": 0.25, "align": "right"},
-                    {"text": format_money(tax['amount']), "width": 0.25, "align": "right"},
-                    {"text": format_money(tax['total']), "width": 0.25, "align": "right"},
-                ]))
-        
+                add(
+                    table_row(
+                        [
+                            {
+                                "text": f"{tax['rate']:.0f}%",
+                                "width": 0.25,
+                                "align": "center",
+                            },
+                            {
+                                "text": format_money(tax["base"]),
+                                "width": 0.25,
+                                "align": "right",
+                            },
+                            {
+                                "text": format_money(tax["amount"]),
+                                "width": 0.25,
+                                "align": "right",
+                            },
+                            {
+                                "text": format_money(tax["total"]),
+                                "width": 0.25,
+                                "align": "right",
+                            },
+                        ]
+                    )
+                )
+
         # === PAIEMENTS ===
         if self.payment_ids:
             add("")
             add("Encaissement:")
             for payment in self.payment_ids:
                 if payment.amount > 0:
-                    add(table_row([
-                        {"text": payment.payment_method_id.name, "width": 0.6, "align": "left"},
-                        {"text": format_money(payment.amount), "width": 0.4, "align": "right"},
-                    ]))
-        
+                    add(
+                        table_row(
+                            [
+                                {
+                                    "text": payment.payment_method_id.name,
+                                    "width": 0.6,
+                                    "align": "left",
+                                },
+                                {
+                                    "text": format_money(payment.amount),
+                                    "width": 0.4,
+                                    "align": "right",
+                                },
+                            ]
+                        )
+                    )
+
         # Rendu monnaie
         total_paid = sum(p.amount for p in self.payment_ids if p.amount > 0)
         change = total_paid - self.amount_total
         if change > 0.01:
-            add(table_row([
-                {"text": "Rendu", "width": 0.6, "align": "left"},
-                {"text": format_money(change), "width": 0.4, "align": "right"},
-            ]))
-        
+            add(
+                table_row(
+                    [
+                        {"text": "Rendu", "width": 0.6, "align": "left"},
+                        {"text": format_money(change), "width": 0.4, "align": "right"},
+                    ]
+                )
+            )
+
         # === FIDÉLITÉ ===
         loyalty = self._get_loyalty_data() if show_loyalty else None
-        
+
         if loyalty:
             add("")
             cmd(BOLD_ON + ALIGN_CENTER)
             add("******** VOTRE COMPTE FIDÉLITÉ ********")
             cmd(BOLD_OFF + ALIGN_LEFT)
-            
+
             add(f"Numéro Carte: {loyalty['card_number']}")
             add(separator("-"))
-            
+
             # Points précédents
-            if loyalty.get('previous_points') is not None and loyalty['previous_points'] > 0:
+            if (
+                loyalty.get("previous_points") is not None
+                and loyalty["previous_points"] > 0
+            ):
                 add(f"Points de fidélité : {loyalty['previous_points']:.1f} pts")
-            
+
             # Points gagnés
-            if loyalty.get('points_earned') is not None and loyalty['points_earned'] > 0:
+            if (
+                loyalty.get("points_earned") is not None
+                and loyalty["points_earned"] > 0
+            ):
                 add(f"Points gagnés: +{loyalty['points_earned']:.1f} pts")
-            
+
             # Points utilisés
-            if loyalty.get('points_used') is not None and loyalty['points_used'] > 0:
+            if loyalty.get("points_used") is not None and loyalty["points_used"] > 0:
                 add(f"Points utilisés: {loyalty['points_used']:.1f} pts")
-            
+
             # Nouveau solde
-            if loyalty.get('current_points') is not None and loyalty['current_points'] > 0:
+            if (
+                loyalty.get("current_points") is not None
+                and loyalty["current_points"] > 0
+            ):
                 cmd(BOLD_ON)
                 add(f"Nouveau solde: {loyalty['current_points']:.1f} pts")
                 cmd(BOLD_OFF)
@@ -563,29 +724,43 @@ class PosOrder(models.Model):
             cmd(BOLD_OFF)
             add("Demandez votre carte, elle est gratuite!")
             cmd(ALIGN_LEFT)
-        
+
         # === PIED DE PAGE ===
         add("")
         cmd(ALIGN_CENTER)
         add(footer_message)
         add(goodbye_message)
-        
+
         # === CODE-BARRES ===
         if print_barcode:
             cmd(feed(1))
             cmd(ALIGN_CENTER)
             cmd(feed(1))
-            
+
             # Utiliser barcode_value si disponible, sinon générer
-            barcode_data = getattr(self, 'barcode_value', None)
+            barcode_data = getattr(self, "barcode_value", None)
             # barcode_data = getattr(self, 'barcode_value', None) or self._generate_barcode_data()
             if barcode_data:
                 cmd(barcode_ean13(barcode_data))
-        
+
         # === COUPE PAPIER ===
         cmd(feed(4))
         cmd(CUT_PAPER)
-        
+
+        # === OUVRIR TIROIR CAISSE ===
+        # si payment_id.payment_method_id.name == "Especes": lancer ouverture tiroir caisse
+        if self.payment_ids:
+            for payment in self.payment_ids:
+                if (
+                    payment.payment_method_id.name
+                    and payment.payment_method_id.name.lower() == "cash"
+                ):
+                    try:
+                        cmd(OPEN_CASH_DRAWER)
+                    except Exception:
+                        cmd(OPEN_CASH_DRAWER_ALTERNATIVE)
+                    break
+
         return bytes(output)
 
     def _generate_barcode_data(self):
@@ -599,7 +774,7 @@ class PosOrder(models.Model):
     @api.model
     def get_receipt_by_name(self, order_name):
         """Récupère une commande par son nom et génère le ticket."""
-        order = self.search([('name', '=', order_name)], limit=1)
+        order = self.search([("name", "=", order_name)], limit=1)
         if not order:
             return None
         return order.generate_escpos_receipt()
