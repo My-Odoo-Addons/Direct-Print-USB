@@ -17,7 +17,7 @@ ALIGN_CENTER = ESC + "a\x01"
 SIZE_NORMAL = ESC + "!\x00"
 SIZE_DOUBLE_HEIGHT = ESC + "!\x10"
 CUT_PAPER = GS + "V\x00"
-
+OPEN_CASH_DRAWER = ESC + "p\x00\x19\xfa"
 
 def feed(n):
     return ESC + f"d{chr(n)}"
@@ -517,7 +517,10 @@ class PosOrder(models.Model):
                         {"text": payment.payment_method_id.name, "width": 0.6, "align": "left"},
                         {"text": format_money(payment.amount), "width": 0.4, "align": "right"},
                     ]))
-        
+            # si payment_id.payment_method_id.name == "Especes": lancer ouverture tiroir caisse
+            if self.payment_ids and self.payment_ids[0].payment_method_id.name.lower() == "cash":
+                add("Caisse ouverte ...")
+                cmd(OPEN_CASH_DRAWER)
         # Rendu monnaie
         total_paid = sum(p.amount for p in self.payment_ids if p.amount > 0)
         change = total_paid - self.amount_total
@@ -585,6 +588,9 @@ class PosOrder(models.Model):
         # === COUPE PAPIER ===
         cmd(feed(4))
         cmd(CUT_PAPER)
+
+        # === OUVRIR TIROIR CAISSE ===
+        cmd(OPEN_CASH_DRAWER)
         
         return bytes(output)
 
