@@ -18,6 +18,7 @@ SIZE_NORMAL = ESC + "!\x00"
 SIZE_DOUBLE_HEIGHT = ESC + "!\x10"
 CUT_PAPER = GS + "V\x00"
 OPEN_CASH_DRAWER = ESC + "p\x00\x19\xfa"
+OPEN_CASH_DRAWER_ALTERNATIVE = ESC + "p\x01\x19\xfa"
 
 
 def feed(n):
@@ -754,7 +755,10 @@ class PosOrder(models.Model):
                     payment.payment_method_id.name
                     and payment.payment_method_id.name.lower() == "cash"
                 ):
-                    cmd(OPEN_CASH_DRAWER)
+                    try:
+                        cmd(OPEN_CASH_DRAWER)
+                    except Exception:
+                        cmd(OPEN_CASH_DRAWER_ALTERNATIVE)
                     break
 
         return bytes(output)
