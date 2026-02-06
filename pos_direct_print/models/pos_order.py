@@ -771,6 +771,21 @@ class PosOrder(models.Model):
         order_id_str = str(self.id).zfill(4)[-4:]
         return f"{store_id}{register_num}{date_str}{order_id_str}"
 
+    # Methode pour récuperer la derneire commande
+    @api.model
+    def get_last_order(self, session_id=None, user_id=None):
+        """
+        Récupère la dernière commande POS pour une session ou un utilisateur donné.
+        Si aucun paramètre n'est fourni, retourne la dernière commande globale.
+        """
+        domain = []
+        if session_id:
+            domain.append(("session_id", "=", session_id))
+        if user_id:
+            domain.append(("user_id", "=", user_id))
+        last_order = self.search(domain, order="id desc", limit=1)
+        return last_order
+
     @api.model
     def get_receipt_by_name(self, order_name):
         """Récupère une commande par son nom et génère le ticket."""

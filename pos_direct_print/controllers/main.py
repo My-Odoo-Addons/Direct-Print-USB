@@ -146,3 +146,42 @@ class PosDirectPrintController(http.Controller):
                 status=500,
                 content_type='text/html'
             )
+
+    @http.route('/pos_direct_print/receipt/last', type='http', auth='public', csrf=False)
+    def get_last_receipt(self, **kwargs):
+        """
+        Retourne les données ESC/POS du dernier ticket pour la session ou l'utilisateur courant.
+        Peut recevoir session_id ou user_id en paramètre GET.
+        """
+        session_id = kwargs.get('session_id')
+        user_id = kwargs.get('user_id')
+        order = request.env['pos.order'].sudo().get_last_order(session_id=session_id, user_id=user_id)
+        if not order:
+            return Response(
+                json.dumps({'error': 'Aucune commande trouvée'}),
+                status=404,
+                content_type='application/json'
+            )
+        try:
+            receipt_data = order.generate_escpos_receipt()
+            return Response(
+                receipt_data,
+                status=200,
+                content_type='application/octet-stream',
+                headers={
+                    'Content-Disposition': f'attachment; filename="{order.name or "last_order"}.bin"',
+                    'X-Order-Name': order.name or '',
+                    'X-Order-Total': str(order.amount_total),
+                    'X-Order-Date': order.date_order.isoformat() if order.date_order else '',
+                }
+            )
+        except Exception as e:
+            import traceback
+            return Response(
+                json.dumps({
+                    'error': str(e),
+                    'traceback': traceback.format_exc()
+                }),
+                status=500,
+                content_type='application/json'
+            )
