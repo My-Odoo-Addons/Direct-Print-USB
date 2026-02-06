@@ -32,7 +32,7 @@ class PosDirectPrintController(http.Controller):
         
         try:
             # Générer le ticket ESC/POS
-            receipt_data = order.generate_escpos_receipt()
+            receipt_data = order.generate_escpos_receipt(reprint=False)
             
             # Retourner les bytes bruts
             return Response(
@@ -118,7 +118,7 @@ class PosDirectPrintController(http.Controller):
             return Response(f"Commande {order_name} non trouvée", status=404)
         
         try:
-            receipt_data = order.generate_escpos_receipt()
+            receipt_data = order.generate_escpos_receipt(reprint=False)
             
             # Décoder pour affichage (remplacer caractères non-imprimables)
             text_preview = ""
@@ -163,7 +163,7 @@ class PosDirectPrintController(http.Controller):
                 content_type='application/json'
             )
         try:
-            receipt_data = order.generate_escpos_receipt()
+            receipt_data = order.generate_escpos_receipt(reprint=True)
             return Response(
                 receipt_data,
                 status=200,

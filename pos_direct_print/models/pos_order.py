@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from datetime import datetime
 from odoo import models, api
 import base64
 import io
@@ -258,7 +259,7 @@ class PosOrder(models.Model):
             for rate, data in sorted(tax_totals.items())
         ]
 
-    def generate_escpos_receipt(self):
+    def generate_escpos_receipt(self, reprint=False):
         """
         Génère les commandes ESC/POS pour le ticket de caisse.
         Utilise la configuration depuis pos.config.
@@ -743,13 +744,11 @@ class PosOrder(models.Model):
             if barcode_data:
                 cmd(barcode_ean13(barcode_data))
 
-        # === COUPE PAPIER ===
-        cmd(feed(4))
-        cmd(CUT_PAPER)
+        
 
         # === OUVRIR TIROIR CAISSE ===
         # si payment_id.payment_method_id.name == "Especes": lancer ouverture tiroir caisse
-        if self.payment_ids:
+        if reprint is False:
             for payment in self.payment_ids:
                 if (
                     payment.payment_method_id.name
@@ -760,7 +759,18 @@ class PosOrder(models.Model):
                     except Exception:
                         cmd(OPEN_CASH_DRAWER_ALTERNATIVE)
                     break
-
+        
+        else: 
+            # En cas de réimpression, ajouter une note pour indiquer que c'est une copie
+            cmd(ALIGN_CENTER + BOLD_ON)
+            message = f" *** Réimpression du Ticket {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}***"
+            add(message)
+            cmd(BOLD_OFF + ALIGN_LEFT)
+        
+        # === COUPE PAPIER ===
+        cmd(feed(4))
+        cmd(CUT_PAPER)
+            
         return bytes(output)
 
     def _generate_barcode_data(self):
