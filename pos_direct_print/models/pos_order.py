@@ -754,7 +754,6 @@ class PosOrder(models.Model):
                     payment.payment_method_id.name
                     and payment.payment_method_id.name.lower() == "cash"
                 ):
-                    add("Caisse ouverte ...")
                     cmd(OPEN_CASH_DRAWER)
                     break
 
