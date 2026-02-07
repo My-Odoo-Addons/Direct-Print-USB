@@ -13,13 +13,16 @@ patch(Navbar.prototype, {
             
             ws.onopen = () => {
                 console.log("🔗 Connecté au serveur d'impression");
-                console.log("🔗 Session ID:", this.pos.config.current_session_id ? this.pos.config.current_session_id.id : null);
+                
+                // 🔥 CORRECTION : utiliser this.pos.config.id directement
+                const configId = this.pos.config.id;
+                console.log("🔗 Config ID:", configId);
                 
                 // Envoyer la demande de réimpression
                 const message = {
                     type: "print",
                     order_name: "last",
-                    session_id: this.pos.config.current_session_id ? this.pos.config.current_session_id.id : null
+                    config_id: configId  // ✅ Maintenant c'est un nombre
                 };
                 
                 ws.send(JSON.stringify(message));
@@ -31,7 +34,6 @@ patch(Navbar.prototype, {
             
             ws.onerror = (error) => {
                 console.error("❌ Erreur WebSocket:", error);
-                // Afficher un message d'erreur à l'utilisateur
                 this.pos.showTempScreen('ErrorPopup', {
                     title: 'Erreur d\'impression',
                     body: 'Impossible de se connecter au serveur d\'impression local. Vérifiez que l\'agent d\'impression est démarré.'
@@ -50,5 +52,4 @@ patch(Navbar.prototype, {
             });
         }
     }
-
 });

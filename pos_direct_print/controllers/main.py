@@ -150,12 +150,48 @@ class PosDirectPrintController(http.Controller):
     @http.route('/pos_direct_print/receipt/last', type='http', auth='public', csrf=False)
     def get_last_receipt(self, **kwargs):
         """
-        Retourne les données ESC/POS du dernier ticket pour la session ou l'utilisateur courant.
-        Peut recevoir session_id ou user_id en paramètre GET.
+        Retourne les données ESC/POS du dernier ticket pour la caisse ou l'utilisateur courant.
+        Peut recevoir config_id ou user_id en paramètre GET.
         """
-        session_id = kwargs.get('session_id')
+        import logging
+        _logger = logging.getLogger(__name__)
+        
+        _logger.info("=" * 60)
+        _logger.info("🌐 CONTROLLER - get_last_receipt appelé")
+        _logger.info(f"📥 kwargs bruts: {kwargs}")
+        
+        config_id = kwargs.get('config_id')
         user_id = kwargs.get('user_id')
-        order = request.env['pos.order'].sudo().get_last_order(session_id=session_id, user_id=user_id)
+        
+        _logger.info(f"🔍 Après .get():")
+        _logger.info(f"   - config_id: {config_id} (type: {type(config_id).__name__})")
+        _logger.info(f"   - user_id: {user_id} (type: {type(user_id).__name__})")
+        
+        if config_id:
+            try:
+                config_id = int(config_id)
+                _logger.info(f"✓ config_id converti: {config_id} (type: {type(config_id).__name__})")
+            except ValueError:
+                config_id = None
+                _logger.warning(f"❌ Échec conversion config_id")
+        else:
+            _logger.warning(f"⚠️  config_id est falsy avant conversion: {config_id}")
+            
+        if user_id:
+            try:
+                user_id = int(user_id)
+                _logger.info(f"✓ user_id converti: {user_id}")
+            except ValueError:
+                user_id = None
+                _logger.warning(f"❌ Échec conversion user_id")
+        
+        _logger.info(f"📤 Paramètres finaux envoyés à get_last_order:")
+        _logger.info(f"   - config_id: {config_id}")
+        _logger.info(f"   - user_id: {user_id}")
+        _logger.info("=" * 60)
+        
+        order = request.env['pos.order'].sudo().get_last_order(config_id=config_id, user_id=user_id)
+        
         if not order:
             return Response(
                 json.dumps({'error': 'Aucune commande trouvée'}),
@@ -164,6 +200,7 @@ class PosDirectPrintController(http.Controller):
             )
         try:
             receipt_data = order.generate_escpos_receipt(reprint=True)
+            print("Receipt data:",receipt_data)
             return Response(
                 receipt_data,
                 status=200,

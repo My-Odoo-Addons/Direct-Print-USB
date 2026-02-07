@@ -57,19 +57,23 @@ class PrintAgent:
         Récupère le ticket formaté (bytes ESC/POS) depuis Odoo.
         data: dict avec order_name, session_id, etc.
         """
+
         if not self.odoo_url:
             print("   ✗ URL Odoo non fournie")
             return None
 
         try:
             order_name = data.get("order_name")
+            print(f"   🔍 Données reçues: {data}")
             if order_name == "last":
                 url = f"{self.odoo_url}/pos_direct_print/receipt/last"
                 params = []
-                if data.get("session_id"):
-                    params.append(f"session_id={data['session_id']}")
+                if data.get("config_id"):
+                    params.append(f"config_id={data['config_id']}")
+                    print(f"   ✓ Ajout param config_id={data['config_id']}")
                 if data.get("user_id"):
                     params.append(f"user_id={data['user_id']}")
+                    print(f"   ✓ Ajout param user_id={data['user_id']}")
                 if params:
                     url += "?" + "&".join(params)
             else:
