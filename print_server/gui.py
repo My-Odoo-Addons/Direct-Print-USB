@@ -598,16 +598,38 @@ class PrintAgentGUI_Wrapper:
 
         self.log_callback(f"Initialisation avec imprimante: {printer_name}")
 
-    def get_receipt_from_odoo(self, order_name):
+    def get_receipt_from_odoo(self, data):
         """Récupère le ticket depuis Odoo"""
         import urllib.request
         import urllib.parse
 
         try:
-            encoded_name = urllib.parse.quote(order_name, safe="")
-            url = f"{self.odoo_url}/pos_direct_print/receipt/{encoded_name}"
+            order_name = data.get("order_name")
+            
+            # 🔍 DEBUG
+            self.log_callback(f"🔍 Données reçues: {data}")
+            
+            if order_name == "last":
+                # Cas spécial : réimpression du dernier ticket
+                url = f"{self.odoo_url}/pos_direct_print/receipt/last"
+                params = []
+                
+                if data.get("config_id"):
+                    params.append(f"config_id={data['config_id']}")
+                    self.log_callback(f"✓ Ajout param config_id={data['config_id']}")
+                
+                if data.get("user_id"):
+                    params.append(f"user_id={data['user_id']}")
+                    self.log_callback(f"✓ Ajout param user_id={data['user_id']}")
+                
+                if params:
+                    url += "?" + "&".join(params)
+            else:
+                # Cas normal : commande spécifique
+                encoded_name = urllib.parse.quote(order_name, safe="")
+                url = f"{self.odoo_url}/pos_direct_print/receipt/{encoded_name}"
 
-            self.log_callback(f"Récupération: {order_name}")
+            self.log_callback(f"📡 Récupération: {url}")
 
             req = urllib.request.Request(url)
             with urllib.request.urlopen(req, timeout=10) as response:
@@ -620,7 +642,6 @@ class PrintAgentGUI_Wrapper:
         except Exception as e:
             self.log_callback(f"✗ Erreur récupération: {e}", "error")
             return None
-
     async def handle_connection(self, websocket):
         """Gère les connexions WebSocket"""
         import json
@@ -633,7 +654,8 @@ class PrintAgentGUI_Wrapper:
                     order_name = data.get("order_name")
                     self.log_callback(f"📥 Demande: {order_name}")
 
-                    receipt_data = self.get_receipt_from_odoo(order_name)
+                    # 🔥 CORRECTION : passer 'data' au lieu de 'order_name'
+                    receipt_data = self.get_receipt_from_odoo(data)
 
                     if receipt_data:
                         if self.printer.print_raw(receipt_data):
@@ -652,7 +674,6 @@ class PrintAgentGUI_Wrapper:
 
             except Exception as e:
                 self.log_callback(f"✗ Erreur: {e}", "error")
-
     async def start(self):
         """Démarre l'agent"""
         import websockets
