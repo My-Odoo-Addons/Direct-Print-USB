@@ -13,11 +13,13 @@ patch(Navbar.prototype, {
             
             ws.onopen = () => {
                 console.log("🔗 Connecté au serveur d'impression");
+                console.log("🔗 Session ID:", this.pos.config.current_session_id ? this.pos.config.current_session_id.id : null);
                 
                 // Envoyer la demande de réimpression
                 const message = {
                     type: "print",
-                    order_name: "last"
+                    order_name: "last",
+                    session_id: this.pos.config.current_session_id ? this.pos.config.current_session_id.id : null
                 };
                 
                 ws.send(JSON.stringify(message));
