@@ -744,8 +744,6 @@ class PosOrder(models.Model):
             if barcode_data:
                 cmd(barcode_ean13(barcode_data))
 
-        
-
         # === OUVRIR TIROIR CAISSE ===
         # si payment_id.payment_method_id.name == "Especes": lancer ouverture tiroir caisse
         if reprint is False:
@@ -759,18 +757,18 @@ class PosOrder(models.Model):
                     except Exception:
                         cmd(OPEN_CASH_DRAWER_ALTERNATIVE)
                     break
-        
-        else: 
+
+        else:
             # En cas de réimpression, ajouter une note pour indiquer que c'est une copie
             cmd(ALIGN_CENTER + BOLD_ON)
             message = f" *** Réimpression du Ticket {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}***"
             add(message)
             cmd(BOLD_OFF + ALIGN_LEFT)
-        
+
         # === COUPE PAPIER ===
         cmd(feed(4))
         cmd(CUT_PAPER)
-            
+
         return bytes(output)
 
     def _generate_barcode_data(self):
@@ -783,52 +781,18 @@ class PosOrder(models.Model):
 
     # Methode pour récuperer la derneire commande
     @api.model
-    def get_last_order(self, config_id=None, user_id=None):
+    def get_last_order(self, config_id=None):
         """
         Récupère la dernière commande POS pour une caisse ou un utilisateur donné.
         Si aucun paramètre n'est fourni, retourne la dernière commande globale.
         """
-        import logging
-        _logger = logging.getLogger(__name__)
-        
-        _logger.info("=" * 60)
-        _logger.info("🔍 GET_LAST_ORDER - Début")
-        _logger.info(f"📥 Paramètres reçus:")
-        _logger.info(f"   - config_id: {config_id} (type: {type(config_id).__name__})")
-        _logger.info(f"   - user_id: {user_id} (type: {type(user_id).__name__})")
-        
+
         domain = []
         if config_id:
             domain.append(("session_id.config_id", "=", config_id))
-            _logger.info(f"✓ Filtre ajouté: session_id.config_id = {config_id}")
-        else:
-            _logger.info(f"⚠️  Aucun filtre config_id (valeur: {config_id})")
-            
-        if user_id:
-            domain.append(("user_id", "=", user_id))
-            _logger.info(f"✓ Filtre ajouté: user_id = {user_id}")
-        else:
-            _logger.info(f"⚠️  Aucun filtre user_id (valeur: {user_id})")
-        
-        _logger.info(f"🔎 Domain final: {domain}")
-        
+
         last_order = self.search(domain, order="id desc", limit=1)
-        
-        if last_order:
-            _logger.info(f"✅ Commande trouvée:")
-            _logger.info(f"   - Nom: {last_order.name}")
-            _logger.info(f"   - ID: {last_order.id}")
-            _logger.info(f"   - Session: {last_order.session_id.name}")
-            _logger.info(f"   - Config ID: {last_order.session_id.config_id.id}")
-            _logger.info(f"   - Config Name: {last_order.session_id.config_id.name}")
-            _logger.info(f"   - User: {last_order.user_id.name}")
-            _logger.info(f"   - Montant: {last_order.amount_total}")
-        else:
-            _logger.warning(f"❌ Aucune commande trouvée avec domain: {domain}")
-        
-        _logger.info("🔍 GET_LAST_ORDER - Fin")
-        _logger.info("=" * 60)
-        
+
         return last_order
 
     @api.model
