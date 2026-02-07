@@ -52,18 +52,30 @@ class PrintAgent:
 
         self.printer = Printer(detected)
 
-    def get_receipt_from_odoo(self, order_name):
+    def get_receipt_from_odoo(self, data):
         """
         Récupère le ticket formaté (bytes ESC/POS) depuis Odoo.
+        data: dict avec order_name, session_id, etc.
         """
         if not self.odoo_url:
             print("   ✗ URL Odoo non fournie")
             return None
 
         try:
-            # Encoder le nom de commande pour l'URL
-            encoded_name = urllib.parse.quote(order_name, safe='')
-            url = f"{self.odoo_url}/pos_direct_print/receipt/{encoded_name}"
+            order_name = data.get("order_name")
+            if order_name == "last":
+                url = f"{self.odoo_url}/pos_direct_print/receipt/last"
+                params = []
+                if data.get("session_id"):
+                    params.append(f"session_id={data['session_id']}")
+                if data.get("user_id"):
+                    params.append(f"user_id={data['user_id']}")
+                if params:
+                    url += "?" + "&".join(params)
+            else:
+                # Encoder le nom de commande pour l'URL
+                encoded_name = urllib.parse.quote(order_name, safe='')
+                url = f"{self.odoo_url}/pos_direct_print/receipt/{encoded_name}"
             
             print(f"   📡 Récupération: {url}")
             
@@ -89,20 +101,19 @@ class PrintAgent:
                 data = json.loads(message)
                 
                 if data.get("type") == "print":
-                    order_name = data.get("order_name")
-                    print(f"📥 Demande d'impression: {order_name}")
+                    print(f"📥 Demande d'impression: {data.get('order_name')}")
                     
                     # Récupérer le ticket depuis Odoo
-                    receipt_data = self.get_receipt_from_odoo(order_name)
+                    receipt_data = self.get_receipt_from_odoo(data)
                     
                     if receipt_data:
                         # Imprimer directement les bytes ESC/POS
                         if self.printer.print_raw(receipt_data):
-                            print(f"   ✓ Ticket imprimé: {order_name}")
+                            print(f"   ✓ Ticket imprimé: {data.get('order_name')}")
                         else:
-                            print(f"   ✗ Échec d'impression: {order_name}")
+                            print(f"   ✗ Échec d'impression: {data.get('order_name')}")
                     else:
-                        print(f"   ✗ Ticket non récupéré: {order_name}")
+                        print(f"   ✗ Ticket non récupéré: {data.get('order_name')}")
                         
             except json.JSONDecodeError as e:
                 print(f"✗ Erreur JSON: {e}")
